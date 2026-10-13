@@ -1,0 +1,202 @@
+{
+  "projectName": "My Mobile App",
+  "appium": {
+    "serverUrl": "http://127.0.0.1:4723",
+    "startupTimeoutSeconds": 30,
+    "logLevel": "error",
+    "saveServerLog": false,
+    "sensitiveEnvNames": [
+      "TEST_USER_EMAIL",
+      "TEST_USER_PASSWORD"
+    ]
+  },
+  "android": {
+    "enabled": true,
+    "appPath": "../apps/app-debug.apk",
+    "appPackage": "com.example.mobile",
+    "appActivity": ".MainActivity",
+    "imageTag": "google_apis",
+    "abi": "x86_64",
+    "deviceProfile": "pixel",
+    "autoGrantPermissions": false,
+    "noReset": false,
+    "recreateDeviceEachRun": true,
+    "baseline": {
+      "apiLevel": "REPLACE_WITH_OLD_STABLE_API",
+      "avdName": "OSDIFF_ANDROID_BASELINE"
+    },
+    "candidate": {
+      "apiLevel": "REPLACE_WITH_NEW_API",
+      "avdName": "OSDIFF_ANDROID_CANDIDATE"
+    },
+    "autoResetStrategy": "android_clear_data"
+  },
+  "ios": {
+    "enabled": true,
+    "appPath": "../apps/MyApp.app",
+    "bundleId": "com.example.mobile",
+    "deviceType": "iPhone 16",
+    "noReset": false,
+    "recreateDeviceEachRun": true,
+    "baseline": {
+      "runtimeVersion": "REPLACE_WITH_OLD_STABLE_IOS",
+      "simulatorName": "OSDIFF_IOS_BASELINE"
+    },
+    "candidate": {
+      "runtimeVersion": "REPLACE_WITH_NEW_IOS",
+      "simulatorName": "OSDIFF_IOS_CANDIDATE"
+    },
+    "autoResetStrategy": "ios_simulator_reinstall"
+  },
+  "comparison": {
+    "checkpointSettleSeconds": 0.25,
+    "pixelThreshold": 18,
+    "visualBlurRadius": 0.6,
+    "changedPixelRatioWarning": 0.01,
+    "changedPixelRatioFailure": 0.05,
+    "meanDifferenceWarning": 0.015,
+    "durationRegressionFactor": 1.75,
+    "minimumDurationRegressionSeconds": 1.0,
+    "hierarchyChangeWarningRatio": 0.15,
+    "hierarchyAttributes": [
+      "type",
+      "class",
+      "name",
+      "label",
+      "resource-id",
+      "content-desc",
+      "enabled",
+      "clickable"
+    ],
+    "hierarchyIgnoreValuePatterns": [],
+    "ignoreRegions": {
+      "android": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1.0,
+          "height": 0.035,
+          "normalized": true
+        }
+      ],
+      "ios": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1.0,
+          "height": 0.055,
+          "normalized": true
+        }
+      ]
+    }
+  },
+  "crawler": {
+    "safeMode": true,
+    "maxScreens": 120,
+    "maxDepth": 12,
+    "maxActionsPerScreen": 24,
+    "maxTotalPaths": 800,
+    "enableScrolling": true,
+    "settleSeconds": 0.6,
+    "afterInputSettleSeconds": 0.3,
+    "denyKeywords": [
+      "\\bdelete\\b",
+      "\\berase\\b",
+      "\\bremove\\b",
+      "\\buninstall\\b",
+      "\\bpurchase\\b",
+      "\\bbuy\\b",
+      "\\bpay\\b",
+      "\\border\\b",
+      "\\bbook\\b",
+      "\\bsend\\b",
+      "\\bsubmit\\b",
+      "\\bsign\\s*out\\b",
+      "\\blog\\s*out\\b",
+      "\\breset\\b",
+      "\\bprint\\b",
+      "\\breprint\\b",
+      "firmware",
+      "factory\\s*reset",
+      "\\bpair\\b",
+      "\\bconnect(?:ion)?\\b",
+      "\\bbluetooth\\b"
+    ],
+    "allowKeywords": [
+      "\\ballow\\b",
+      "\\bwhile using\\b",
+      "\\bok\\b",
+      "\\bcontinue\\b",
+      "\\bnext\\b",
+      "\\bcancel\\b",
+      "\\bnot now\\b"
+    ],
+    "autoInputRules": [
+      {
+        "pattern": "email|e-mail|username|user name",
+        "env": "TEST_USER_EMAIL"
+      },
+      {
+        "pattern": "password|passcode|pin",
+        "env": "TEST_USER_PASSWORD"
+      }
+    ],
+    "fingerprintAttributes": [
+      "type",
+      "class",
+      "name",
+      "label",
+      "value",
+      "text",
+      "resource-id",
+      "content-desc",
+      "enabled",
+      "clickable",
+      "scrollable"
+    ],
+    "fingerprintIgnorePatterns": [
+      "\\b\\d{1,2}:\\d{2}\\b",
+      "\\b\\d{4}-\\d{2}-\\d{2}\\b"
+    ],
+    "resetTimeoutSeconds": 45,
+    "allowedSystemPackages": {
+      "android": [
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+        "com.android.packageinstaller",
+        "com.google.android.providers.media.module",
+        "com.android.providers.media.module",
+        "com.android.settings",
+        "com.google.android.documentsui",
+        "com.android.documentsui"
+      ],
+      "ios": [
+        "com.apple.springboard",
+        "com.apple.Preferences",
+        "com.apple.mobileslideshow",
+        "com.apple.DocumentsApp"
+      ]
+    }
+  },
+  "marketMode": {
+    "androidAllowedInstallers": [
+      "com.android.vending"
+    ],
+    "requireSameHardwareModel": false,
+    "iosRequireAppStoreAttestation": true,
+    "notes": "Market mode inspects preinstalled store builds and never supplies a target app binary. Exact marketing version/build matching is mandatory. Android defaults to data/permission clear, preserving the binary; real iOS relaunch is non-deterministic. External reset hooks are trusted on exit zero and must preserve the market binary. Known identity, candidate reset, safe-control, and evidence gaps remain: see docs/BASELINE_ASSESSMENT.md and docs/CONFIGURATION.md.",
+    "requireMatchingEnvironment": true,
+    "androidResetStrategy": "android_clear_data",
+    "iosResetStrategy": "relaunch",
+    "iosResetCommand": null
+  },
+  "artifactPrivacy": {
+    "privatePermissions": true,
+    "notes": "POSIX permissions are best-effort; Windows ACLs are unchanged. sensitiveRegions masks screenshots before storage; comparison.ignoreRegions only affects measurement. Current literal XML redaction and unsanitized trace/error fields are known defects. Use dedicated non-personal data; positive retentionDays deletes old local run directories. See docs/ARTIFACTS.md.",
+    "sensitiveRegions": {
+      "android": [],
+      "ios": []
+    },
+    "retentionDays": 0
+  }
+}

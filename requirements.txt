@@ -1,0 +1,6 @@
+# Python 3.10+; install in the project .venv before CLI or unittest discovery.
+# Appium server/driver pins are separate: config/tool-versions.json.
+# These ranges are unchanged; successful installation is not device validation.
+Appium-Python-Client>=5.1,<6
+Pillow>=11,<13
+selenium>=4.26,<5

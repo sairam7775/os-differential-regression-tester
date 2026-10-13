@@ -1,0 +1,136 @@
+{
+  "name": "core_navigation",
+  "description": "Synthetic locator example for virtual-device scenario mode, not a validated INSTAX flow. Replace accessibility IDs with verified app controls. Set TEST_USER_EMAIL and TEST_USER_PASSWORD in the process environment; .env is not loaded automatically. The secure marker is informational and scenario actions do not apply crawler deny rules. Use dedicated test data and see docs/SCENARIOS.md before execution.",
+  "platforms": [
+    "android",
+    "ios"
+  ],
+  "steps": [
+    {
+      "type": "checkpoint",
+      "id": "launch",
+      "assertions": [
+        {
+          "type": "element_present",
+          "locator": {
+            "android": {
+              "strategy": "accessibility_id",
+              "value": "login_button"
+            },
+            "ios": {
+              "strategy": "accessibility_id",
+              "value": "login_button"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "tap",
+      "locator": {
+        "android": {
+          "strategy": "accessibility_id",
+          "value": "login_button"
+        },
+        "ios": {
+          "strategy": "accessibility_id",
+          "value": "login_button"
+        }
+      }
+    },
+    {
+      "type": "checkpoint",
+      "id": "login",
+      "assertions": [
+        {
+          "type": "element_present",
+          "locator": {
+            "android": {
+              "strategy": "accessibility_id",
+              "value": "email_field"
+            },
+            "ios": {
+              "strategy": "accessibility_id",
+              "value": "email_field"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "type_text",
+      "text": "${TEST_USER_EMAIL}",
+      "locator": {
+        "android": {
+          "strategy": "accessibility_id",
+          "value": "email_field"
+        },
+        "ios": {
+          "strategy": "accessibility_id",
+          "value": "email_field"
+        }
+      }
+    },
+    {
+      "type": "type_text",
+      "text": "${TEST_USER_PASSWORD}",
+      "secure": true,
+      "locator": {
+        "android": {
+          "strategy": "accessibility_id",
+          "value": "password_field"
+        },
+        "ios": {
+          "strategy": "accessibility_id",
+          "value": "password_field"
+        }
+      }
+    },
+    {
+      "type": "tap",
+      "locator": {
+        "android": {
+          "strategy": "accessibility_id",
+          "value": "submit_login"
+        },
+        "ios": {
+          "strategy": "accessibility_id",
+          "value": "submit_login"
+        }
+      }
+    },
+    {
+      "type": "wait_for",
+      "timeout": 20,
+      "locator": {
+        "android": {
+          "strategy": "accessibility_id",
+          "value": "home_screen"
+        },
+        "ios": {
+          "strategy": "accessibility_id",
+          "value": "home_screen"
+        }
+      }
+    },
+    {
+      "type": "checkpoint",
+      "id": "home",
+      "assertions": [
+        {
+          "type": "element_present",
+          "locator": {
+            "android": {
+              "strategy": "accessibility_id",
+              "value": "home_screen"
+            },
+            "ios": {
+              "strategy": "accessibility_id",
+              "value": "home_screen"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
