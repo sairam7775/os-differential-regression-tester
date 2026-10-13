@@ -2,6 +2,10 @@
 
 A standalone local regression tool for comparing the **same mobile app build** across an old/stable OS and a new/candidate OS. The production-oriented workflow uses the **market-installed app on two physical devices** and automatically discovers/replays reachable UI states.
 
+## Development baseline
+
+See [the v0.5.0 baseline assessment](docs/BASELINE_ASSESSMENT.md) for actual test results, known safety and validity issues, and the prioritized stabilization plan. The imported baseline has not been validated on physical devices.
+
 ## Primary workflow: `market-run`
 
 The app must already be installed from Google Play or Apple App Store. The tool does **not** sideload, replace, upgrade, or downgrade the app under test.
