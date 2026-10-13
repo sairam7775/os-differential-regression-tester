@@ -20,5 +20,25 @@
   "marketEnvironmentPreflight": true,
   "androidMarketResetStrategy": "android_clear_data",
   "iosMarketResetSemantics": "PARTIAL unless deterministic reset command configured",
-  "privateArtifactPermissions": true
+  "privateArtifactPermissions": true,
+  "documentation": {
+    "developerGuide": "docs/DEVELOPER_GUIDE.md",
+    "configuration": "docs/CONFIGURATION.md",
+    "artifacts": "docs/ARTIFACTS.md",
+    "baselineAssessment": "docs/BASELINE_ASSESSMENT.md",
+    "agentInstructions": "AGENTS.md",
+    "claudeInstructions": "CLAUDE.md"
+  },
+  "validation": {
+    "status": "baseline_requires_stabilization",
+    "featureFlagsAreValidationEvidence": false,
+    "baselineTestMethodsInSource": 38,
+    "baselinePassingMethods": 14,
+    "baselineTestMethodErrors": 1,
+    "baselineDiscoveryErrors": 2,
+    "physicalDeviceValidationPerformed": false,
+    "liveAppiumValidationPerformed": false,
+    "completedClaudeReviewReceived": false,
+    "details": "Historical baseline evidence; see docs/BASELINE_ASSESSMENT.md. Documentation changes are not functional fixes."
+  }
 }

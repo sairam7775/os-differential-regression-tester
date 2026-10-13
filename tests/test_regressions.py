@@ -1,3 +1,10 @@
+"""Artifact comparison, HTML escaping, and scenario-ordering regressions.
+
+Fixtures are temporary synthetic PNG/XML/JSON files. A runner import, including
+one satisfied by another module's stubs, is not a real Appium integration check.
+The optional runner test skips only when that import fails.
+"""
+
 import importlib.util
 import json
 import tempfile

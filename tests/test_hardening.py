@@ -1,3 +1,11 @@
+"""Synthetic crawler, report, and infrastructure regression checks.
+
+Pillow is required for image fixtures; no physical devices are exercised.
+This module installs process-global Appium/Selenium stubs when not yet imported.
+Those stubs can hide installed clients and make other tests import-order dependent;
+their replacement is tracked in docs/BASELINE_ASSESSMENT.md.
+"""
+
 import json
 import importlib.util
 import os

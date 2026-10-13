@@ -1,3 +1,11 @@
+"""Probe preinstalled physical-device apps and gate market-build comparisons.
+
+Android origin uses package-manager metadata; iOS origin is operator attestation.
+Exact marketing version and build must match before crawling. Market runtimes
+omit the Appium app capability so the normal path preserves the installed binary.
+Missing OS evidence and post-run app revalidation remain stabilization work.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +19,7 @@ from osdiff.fsutil import private_dir, write_json
 
 
 def _run(cmd, timeout=30, check=True):
+    """Run a bounded physical-device probe; checked errors include command/output detail."""
     try:
         proc = subprocess.run(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -27,11 +36,13 @@ def _run(cmd, timeout=30, check=True):
 
 
 def _adb(serial, *args, timeout=30, check=True):
+    """Target exactly one serial for each ADB probe; ADB currently resolves through PATH only."""
     adb = shutil.which("adb") or "adb"
     return _run([adb, "-s", serial, *args], timeout=timeout, check=check)
 
 
 def list_android_devices():
+    """Parse authorized adb devices -l entries; callers still need to reject emulators."""
     adb = shutil.which("adb") or "adb"
     out = _run([adb, "devices", "-l"], check=False)
     devices = []
@@ -49,18 +60,22 @@ def list_android_devices():
 
 
 def _android_is_emulator(serial):
+    """Check emulator serial prefix and ro.kernel.qemu before physical-device market testing."""
     return serial.startswith("emulator-") or _adb(serial, "shell", "getprop", "ro.kernel.qemu", check=False).strip() == "1"
 
 
 def _android_package_installed(serial, package_id):
+    """Check pm path without installing, upgrading, or downgrading the target package."""
     return bool(_adb(serial, "shell", "pm", "path", package_id, check=False).strip())
 
 
 def _android_pkg_dump(serial, package_id):
+    """Read package-manager metadata for version/build extraction without modifying the app."""
     return _adb(serial, "shell", "dumpsys", "package", package_id, timeout=45, check=False)
 
 
 def _extract_android_version(dump):
+    """Return marketing versionName and numeric versionCode strings, or None when unavailable."""
     version_name = None
     version_code = None
     m = re.search(r"\bversionName=([^\s]+)", dump)
@@ -73,6 +88,10 @@ def _extract_android_version(dump):
 
 
 def _android_installer(serial, package_id):
+    """Prefer installer-source metadata and fall back to pm list packages -i.
+    
+    This is metadata-based provenance, not cryptographic verification of a store
+    receipt. The first available source label is used by the current parser."""
     raw = _adb(serial, "shell", "cmd", "package", "get-install-source", package_id, check=False)
     candidates = []
     for label in (
@@ -91,6 +110,7 @@ def _android_installer(serial, package_id):
 
 
 def _android_launch_activity(serial, package_id):
+    """Resolve a package launch component without launching or replacing its installed binary."""
     raw = _adb(serial, "shell", "cmd", "package", "resolve-activity", "--brief", package_id, check=False)
     for line in reversed([x.strip() for x in raw.splitlines() if x.strip()]):
         if "/" in line and package_id in line:
@@ -99,12 +119,14 @@ def _android_launch_activity(serial, package_id):
 
 
 def _android_orientation(serial):
+    """Extract SurfaceOrientation when input-service diagnostics expose it."""
     raw = _adb(serial, "shell", "dumpsys", "input", check=False)
     m = re.search(r"SurfaceOrientation:\s*(\d+)", raw)
     return m.group(1) if m else None
 
 
 def _android_environment(serial):
+    """Collect comparable locale/timezone/font/display facts, preserving unavailable values."""
     locale = _adb(serial, "shell", "getprop", "persist.sys.locale", check=False).strip()
     if not locale:
         locale = _adb(serial, "shell", "getprop", "ro.product.locale", check=False).strip()
@@ -120,6 +142,10 @@ def _android_environment(serial):
 
 
 def probe_android_market_device(serial, package_id, allowed_installers=None, app_activity=None):
+    """Verify authorization/physical target and return installed app, OS, origin, and environment facts.
+    
+    All operations inspect the specified serial. Missing version/build fails pair
+    validation; OS identity missingness still needs stricter checks."""
     allowed_installers = list(allowed_installers or ["com.android.vending"])
     connected = {d["serial"]: d for d in list_android_devices()}
     if serial not in connected:
@@ -162,6 +188,7 @@ def probe_android_market_device(serial, package_id, allowed_installers=None, app
 
 
 def _normalize_ios_apps(raw):
+    """Normalize supported listApps response shapes to a list of bundle attribute dictionaries."""
     if isinstance(raw, dict):
         if "applications" in raw and isinstance(raw["applications"], list):
             return raw["applications"]
@@ -178,6 +205,10 @@ def _normalize_ios_apps(raw):
 
 
 def probe_ios_market_device(server_url, udid, bundle_id, app_store_confirmed=False):
+    """Use a temporary XCUITest session to inspect one preinstalled physical-device app.
+    
+    The session is always quit after successful creation. Store origin is operator
+    attestation; absent simulator metadata currently does not prove physical identity."""
     if platform.system() != "Darwin":
         raise RuntimeError("iOS real-device market testing requires macOS with Xcode.")
     from appium import webdriver
@@ -253,6 +284,7 @@ def probe_ios_market_device(server_url, udid, bundle_id, app_store_confirmed=Fal
 
 
 def _os_identity(device):
+    """Form a version/API/patch/build tuple, currently substituting empty strings for unknowns."""
     return tuple(
         str(device.get(key) or "")
         for key in ("osVersion", "apiLevel", "securityPatch", "buildFingerprint")
@@ -260,6 +292,7 @@ def _os_identity(device):
 
 
 def _environment_differences(baseline, candidate):
+    """Compare only environment fields exposed on both devices; unknown fields are skipped."""
     b = baseline.get("environment") or {}
     c = candidate.get("environment") or {}
     differences = []
@@ -273,6 +306,11 @@ def _environment_differences(baseline, candidate):
 
 
 def validate_market_pair(baseline, candidate, require_same_model=False, require_matching_environment=True):
+    """Return gate validity, error labels, warnings, and app/model/environment comparison evidence.
+    
+    Version and build matching is mandatory. Model/environment policies can be
+    configured; missing OS fields currently can create a false difference, and
+    physicalDevice is assumed from the probe rather than rechecked here."""
     errors, warnings = [], []
     if baseline.get("deviceId") == candidate.get("deviceId"):
         errors.append("baseline_and_candidate_device_ids_must_differ")
@@ -334,6 +372,10 @@ def validate_market_pair(baseline, candidate, require_same_model=False, require_
 
 
 def market_runtime(device, platform_name, *, reset_strategy=None, reset_command=None):
+    """Build a preinstalled target runtime without an app binary and choose its reset strategy.
+    
+    Android defaults to data clear; real iOS defaults to non-deterministic relaunch.
+    An operator reset command overrides the chosen strategy."""
     runtime = {
         "udid": device["deviceId"],
         "deviceName": device.get("deviceName") or device.get("model") or platform_name,
@@ -359,6 +401,9 @@ def market_runtime(device, platform_name, *, reset_strategy=None, reset_command=
 
 
 def _sanitized_device(device):
+    """Mask/hash the primary device ID and drop raw installer output for persisted provenance.
+    
+    This does not sanitize exceptions, traces, or arbitrary metadata elsewhere."""
     item = dict(device)
     device_id = str(item.pop("deviceId", "") or "")
     if device_id:
@@ -369,6 +414,7 @@ def _sanitized_device(device):
 
 
 def write_provenance(path, baseline, candidate, validation):
+    """Persist sanitized baseline/candidate facts and validation under the real-device market mode."""
     data = {
         "mode": "real-device-market-build", "toolInstalledApp": False,
         "baseline": _sanitized_device(baseline),

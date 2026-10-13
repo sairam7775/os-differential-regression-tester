@@ -1,59 +1,62 @@
-# Automatic Discovery — v0.5
+# Automatic discovery and replay
 
-Automatic discovery is used by both virtual `auto-run` and physical `market-run`.
+Both `auto-run` and `market-run` use `osdiff.crawler`. Policy and limits are
+documented in [configuration](CONFIGURATION.md); persisted graph/trace fields
+are documented in [artifacts](ARTIFACTS.md).
 
-## Algorithm
+## Actual algorithm
 
-```text
-Reset to known start state
-  ↓
-Launch target app
-  ↓
-Verify foreground app/system surface
-  ↓
-Capture native hierarchy
-  ↓
-Fingerprint hierarchy + normalized text/value + foreground context
-  ↓
-Fill configured test inputs
-  ↓
-Discover tappable controls
-  ↓
-Apply fail-closed safety filter
-  ↓
-Queue child paths breadth-first
-```
+1. Start a reusable target-specific Appium session.
+2. Pop a baseline action path from a breadth-first queue, initially the empty path.
+3. Terminate/reset/activate the target, then replay the path from launch.
+4. Before each action, attempt configured input filling; after it, check foreground.
+5. Capture hierarchy/context and fingerprint them; discard previously visited states.
+6. For a first-seen state, fill known inputs, discover/filter/sort/cap actions, and save a checkpoint.
+7. Queue child paths unless depth/other limits stop exploration.
+8. Persist graph/summary, then replay one retained path per baseline screen on candidate.
 
-Each queued path is replayed from the reset start state. The candidate OS replays the paths discovered on baseline.
+One driver is reused per phase. Replay failure closes/recreates it. Session
+creation and capture failures can still escape outside replay-error handling.
 
-## Safety
+## State and action identity
 
-Deny patterns are evaluated first and cannot be overridden by allowed words. `Continue to Pay` and `Continue to Print` are blocked in safe mode.
+Fingerprinting uses configured hierarchy attributes, normalized dynamic patterns,
+and foreground context. It includes text/value by default. iOS context currently
+includes transient PID, so relaunch may create duplicate state identities.
+Fingerprinting also precedes input filling while capture can follow filling;
+these identities/artifacts need alignment during stabilization.
 
-If a screen contains more controls than `maxActionsPerScreen`, the extra controls are recorded as `actions_truncated` and coverage becomes `PARTIAL`; they are never silently omitted from a “complete” run.
+Tap actions contain label, ordered locator candidates, ordinal, and bounds.
+Ordinals are counted after safety filtering, while replay indexes unfiltered
+live locator matches. This can select Print for a retained Settings action when
+they share an ID. Fallback locators may have different match sets. Do not regard
+the action record or keyword check as proof of safe live resolution.
 
-## State identity
+The graph retains first-seen paths and queued `from` edges; it does not reliably
+record edge destinations or duplicate-state outcomes. Candidate `reproducedScreens`
+means captured checkpoints, not verified destination equivalence. Candidate
+fingerprints are stored as metadata and not directly enforced by comparison.
 
-Visible `text`/`value` is included by default and normalized using `fingerprintIgnorePatterns`. This prevents onboarding/list/detail screens with the same control structure but different visible content from being collapsed into one state.
+## Policy and incomplete coverage
 
-Foreground package/activity or iOS bundle context is also part of the state identity.
+Deny patterns win over allowed words. Blocked controls and unresolved inputs at
+discovered states, action truncation, baseline replay failure, depth/queue/screen/
+path limits, parse failure, and branched non-deterministic baseline reset force
+PARTIAL. Partial coverage is supplied to the report and yields INVALID/exit 3.
 
-## Coverage becomes PARTIAL when
+Current intermediate replay input blockers and candidate input/reset evidence are
+not fully promoted into validity. Candidate missing checkpoints can score as
+regressions, but that does not repair incomplete baseline evidence. Positive
+coverage claims must address both sides and all explored/blocked/frontier actions.
 
-- baseline path replay fails;
-- app state cannot be reset deterministically for branched exploration;
-- an unsafe action is blocked;
-- a required input has no rule/value;
-- action candidates are truncated;
-- crawler limits are reached.
+## Supported surface and limitations
 
-The report itself becomes `INVALID` for full compatibility sign-off when coverage is PARTIAL.
+Native control heuristics cover taps, fields, tabs/cells/buttons by type, and a
+whole-window downward swipe when scrollable content is recognized. There is no
+automatic back action, container-specific upward/horizontal traversal, scroll-end
+proof, or full custom/WebView interaction support. Fixed settling sleeps and
+dynamic data can affect snapshots. Built-in system packages are always allowed;
+configuration adds packages rather than removing the built-ins.
 
-## Behavior/timing
-
-The complete action trace used to reach every checkpoint is persisted on baseline and candidate. The comparison engine detects candidate action failures and configured duration regressions.
-
-
-## Hardware-state safety
-
-Automatic safe mode blocks **Pair / Connect / Bluetooth / Print / Reprint / Firmware** actions by default. App-state reset does not reset external printer or Bluetooth hardware state. Use explicit controlled hardware scenarios for these flows; otherwise the automatic coverage result remains partial.
+Printing, reprinting, Bluetooth pairing/connections, firmware, purchases, and
+destructive operations remain outside automatic safe-mode validation.

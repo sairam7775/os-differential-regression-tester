@@ -1,3 +1,11 @@
+"""Compare persisted checkpoints and render a local HTML/JSON report.
+
+Inputs are per-device run summaries plus screenshot, hierarchy, and state files.
+INVALID means comparison evidence is insufficient; FAIL means a scored candidate
+regression. Current artifact-loading and baseline-assertion gaps are documented
+in docs/BASELINE_ASSESSMENT.md. See docs/ARTIFACTS.md for persisted field meanings.
+"""
+
 from __future__ import annotations
 
 import html
@@ -14,6 +22,7 @@ from osdiff.fsutil import private_dir, private_file, write_json, write_text
 
 
 def _load(path, default=None):
+    """Load JSON or return default on any error; malformed evidence is currently hidden."""
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:
@@ -21,6 +30,7 @@ def _load(path, default=None):
 
 
 def _normalized_attr(value, cfg):
+    """Replace configured dynamic-value patterns before hierarchy signature comparison."""
     value = str(value)
     for pattern in cfg.get("hierarchyIgnoreValuePatterns", []):
         value = re.sub(pattern, "<dynamic>", value)
@@ -28,6 +38,7 @@ def _normalized_attr(value, cfg):
 
 
 def _signature_counts(path, cfg):
+    """Count attribute/depth/parent signatures, preserving duplicates and returning parse errors."""
     try:
         raw = Path(path).read_text(encoding="utf-8", errors="replace")
         root = ET.fromstring(raw)
@@ -63,6 +74,10 @@ def _signature_counts(path, cfg):
 
 
 def hierarchy_result(a, b, cfg):
+    """Return hierarchy validity and a multiset Jaccard difference ratio in the range 0..1.
+    
+    Default signatures omit Android text and iOS value. Two empty signatures count
+    as identical; these limitations must not be confused with meaningful UI equality."""
     aa, error_a = _signature_counts(a, cfg)
     bb, error_b = _signature_counts(b, cfg)
     if error_a or error_b:
@@ -86,10 +101,12 @@ def hierarchy_result(a, b, cfg):
 
 
 def hierarchy_ratio(a, b, cfg):
+    """Return only the difference ratio; callers needing validity must use hierarchy_result."""
     return hierarchy_result(a, b, cfg)["ratio"]
 
 
 def _mask_regions(img, regions):
+    """Black out ignored pixel/normalized regions in a comparison copy, not the stored original."""
     out = img.copy()
     draw = ImageDraw.Draw(out)
     width, height = out.size
@@ -109,6 +126,11 @@ def _mask_regions(img, regions):
 
 
 def visual(base, cand, diff_out, cfg, platform):
+    """Measure blurred pixel changes and write an unblurred highlighted overlay.
+    
+    Candidate pixels are resized for measurement when dimensions differ; original
+    sizes are retained in the result. ignoreRegions affects measurement, whereas
+    artifactPrivacy.sensitiveRegions is applied before screenshot storage."""
     original_a = Image.open(base).convert("RGB")
     original_b = Image.open(cand).convert("RGB")
     dimension_changed = original_a.size != original_b.size
@@ -159,6 +181,10 @@ def visual(base, cand, diff_out, cfg, platform):
 
 
 def _behavior(baseline_state, candidate_state, cfg):
+    """Compare baseline-passed assertions and common-prefix action status/timing.
+    
+    Failed baseline assertions and absent trailing candidate actions are not yet
+    invalidated. Action indices are compared without verifying their identity."""
     out = []
     baseline_assertions = baseline_state.get("assertions", [])
     candidate_assertions = candidate_state.get("assertions", [])
@@ -214,6 +240,7 @@ def _behavior(baseline_state, candidate_state, cfg):
 
 
 def _discover(root):
+    """Index checkpoints by (scenario, checkpoint) using the two-level state.json layout."""
     root = Path(root)
     out = {}
     if not root.exists():
@@ -224,11 +251,16 @@ def _discover(root):
 
 
 def _summary_map(path):
+    """Index run-summary entries by scenario; duplicate names overwrite earlier entries."""
     data = _load(path, []) or []
     return {entry.get("scenario"): entry for entry in data if entry.get("scenario")}
 
 
 def _execution_results(results_root, platform):
+    """Create execution-level INVALID/FAIL rows from run summaries.
+    
+    A baseline failure invalidates the experiment; candidate failure is a regression.
+    Malformed or empty summaries currently need additional fail-closed validation."""
     base_path = Path(results_root) / platform / "baseline" / "run-summary.json"
     cand_path = Path(results_root) / platform / "candidate" / "run-summary.json"
     baseline = _summary_map(base_path)
@@ -361,6 +393,7 @@ def _execution_results(results_root, platform):
 
 
 def _score(item, cfg):
+    """Assign the maximum applicable risk score and reason labels, rather than summing scores."""
     if item["missingCandidate"]:
         return 98, ["checkpoint_missing_on_new_os"]
     if item["missingBaseline"]:
@@ -402,6 +435,7 @@ def _score(item, cfg):
 
 
 def _severity(score):
+    """Map numeric risk to Low/Medium/High/Critical thresholds; validity is handled separately."""
     return (
         "Critical"
         if score >= 90
@@ -414,6 +448,10 @@ def _severity(score):
 
 
 def compare_platform(results_root, platform, cfg, report_root):
+    """Join checkpoint artifacts, copy report images, and score each result plus execution rows.
+    
+    Missing evidence and candidate regression are different concepts. Capture/file
+    errors may still escape before a final report; see the baseline assessment."""
     baseline = _discover(Path(results_root) / platform / "baseline")
     candidate = _discover(Path(results_root) / platform / "candidate")
     assets = private_dir(Path(report_root) / "assets" / platform)
@@ -506,10 +544,16 @@ def compare_platform(results_root, platform, cfg, report_root):
 
 
 def _e(value):
+    """Escape dynamic text and attributes before inserting them into local report HTML."""
     return html.escape(str(value), quote=True)
 
 
 def write_report(report_root, results, project_name="Mobile App", coverage=None, provenance=None):
+    """Write HTML, comparison.json, and summary.json with authoritative overall status.
+    
+    INVALID outranks FAIL, then REVIEW, then PASS. Supplied incomplete coverage or
+    invalid provenance overrides scores; an empty results list alone is not validated.
+    The current checkpoint count also includes invalid non-synthetic rows."""
     report_root = private_dir(report_root)
     results = sorted(
         results,

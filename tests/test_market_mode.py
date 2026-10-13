@@ -1,3 +1,10 @@
+"""Synthetic provenance and market-runtime checks, not device validation.
+
+The iOS metadata test supplies a partial Appium mock and currently depends on
+runner/options being importable through other test setup. Run this module alone
+as well as in discovery when stabilizing the mocks; see tests/README.md.
+"""
+
 from pathlib import Path
 import sys
 import unittest
@@ -11,6 +18,7 @@ from osdiff.market import validate_market_pair, market_runtime, _normalize_ios_a
 
 
 def device(role="baseline", **overrides):
+    """Build synthetic market facts with role-specific IDs/OS versions; no device is contacted."""
     base = {
         "platform": "android",
         "physicalDevice": True,

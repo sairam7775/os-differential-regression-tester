@@ -1,3 +1,12 @@
+"""Discover baseline UI states and replay their navigation paths on a candidate.
+
+Each queued path starts with the configured app-state reset. One Appium session
+is reused per phase and discarded after a replay error. Actions store locator
+candidates, ordinals, and bounds; these are not proof of safe live targeting.
+The imported baseline has unresolved locator/safety and reset-evidence gaps.
+See docs/AUTO_DISCOVERY.md and docs/BASELINE_ASSESSMENT.md before changing it.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -36,10 +45,12 @@ DEFAULT_IOS_SYSTEM_BUNDLES = {
 
 
 def _truthy(value):
+    """Normalize selected XML string booleans from Android/iOS hierarchy attributes."""
     return str(value).lower() in {"1", "true", "yes"}
 
 
 def _xml_root(source):
+    """Parse native hierarchy XML, returning None so discovery can record a parse blocker."""
     try:
         return ET.fromstring(source)
     except Exception:
@@ -47,6 +58,7 @@ def _xml_root(source):
 
 
 def _xpath_literal(value):
+    """Encode text as an XPath literal, including values containing both quote styles."""
     value = str(value)
     if '"' not in value:
         return f'"{value}"'
@@ -57,6 +69,7 @@ def _xpath_literal(value):
 
 
 def _bounds_android(value):
+    """Parse positive Android bounds [x1,y1][x2,y2]; invalid/zero-sized bounds return None."""
     match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", value or "")
     if not match:
         return None
@@ -67,6 +80,7 @@ def _bounds_android(value):
 
 
 def _bounds_ios(attrs):
+    """Convert iOS position/dimensions to an integer rectangle, or return None."""
     try:
         x, y = int(float(attrs.get("x", 0))), int(float(attrs.get("y", 0)))
         w, h = int(float(attrs.get("width", 0))), int(float(attrs.get("height", 0)))
@@ -78,6 +92,7 @@ def _bounds_ios(attrs):
 
 
 def _label(platform, attrs):
+    """Choose the first non-empty descriptive hierarchy attribute, not a merged control identity."""
     if platform == "android":
         values = [attrs.get("content-desc"), attrs.get("text"), attrs.get("resource-id"), attrs.get("class")]
     else:
@@ -86,12 +101,14 @@ def _label(platform, attrs):
 
 
 def _is_input(platform, attrs):
+    """Recognize native text fields; custom/web controls are outside this heuristic."""
     if platform == "android":
         return "EditText" in attrs.get("class", "") or _truthy(attrs.get("editable"))
     return attrs.get("type") in {"XCUIElementTypeTextField", "XCUIElementTypeSecureTextField"}
 
 
 def _is_scrollable(platform, attrs):
+    """Recognize native scroll containers; discovery currently queues only a window-wide down swipe."""
     if platform == "android":
         return _truthy(attrs.get("scrollable"))
     return attrs.get("type", "") in {
@@ -101,6 +118,7 @@ def _is_scrollable(platform, attrs):
 
 
 def _is_actionable(platform, attrs):
+    """Filter native controls by enabled/visible/type heuristics; this does not prove tap safety."""
     if str(attrs.get("enabled", "true")).lower() == "false":
         return False
     if platform == "android":
@@ -115,6 +133,7 @@ def _is_actionable(platform, attrs):
 
 
 def _locators(platform, attrs):
+    """Return ordered ID/accessibility/text/class locator candidates for later replay."""
     locators = []
     if platform == "android":
         rid, desc, text, cls = (
@@ -140,7 +159,7 @@ def _locators(platform, attrs):
 
 
 def _danger_reason(text, cfg):
-    """Deny always wins. A permissive word such as 'Continue' must never un-block 'Pay'."""
+    """Return the first deny-pattern reason; allowKeywords never override a deny."""
     text = str(text or "")
     for deny in cfg.get("denyKeywords", []):
         if re.search(deny, text, re.I):
@@ -150,6 +169,7 @@ def _danger_reason(text, cfg):
 
 
 def _normalize_for_fingerprint(source, cfg):
+    """Serialize configured hierarchy attributes in tree order with dynamic-value normalization."""
     root = _xml_root(source)
     if root is None:
         return re.sub(r"\s+", " ", source or "").strip()
@@ -183,6 +203,10 @@ def _normalize_for_fingerprint(source, cfg):
 
 
 def state_fingerprint(source, cfg, context=None):
+    """Hash normalized UI plus supplied foreground context into a 16-character state key.
+    
+    Transient iOS pid is currently included by callers, so relaunches can generate
+    new keys for the same screen. This is a discovery identity, not a safety proof."""
     normalized = _normalize_for_fingerprint(source, cfg)
     if context:
         normalized += "\n@context:" + "|".join(f"{k}={context[k]}" for k in sorted(context) if context[k])
@@ -190,6 +214,11 @@ def state_fingerprint(source, cfg, context=None):
 
 
 def discover_actions(source, platform, cfg):
+    """Return (safe candidate actions, blocked reasons, input fields) from hierarchy XML.
+    
+    Actions contain kind, label, locator candidates, ordinal, and bounds. Ordinals
+    currently count filtered controls, which can resolve to a different unsafe live
+    control. Read the baseline assessment before trusting automatic clicks."""
     root = _xml_root(source)
     if root is None:
         return [], [{"label": "(hierarchy)", "reason": "hierarchy_parse_failed"}], []
@@ -247,6 +276,7 @@ def discover_actions(source, platform, cfg):
 
 
 def _find_elements(driver, locator):
+    """Query a locator and collapse exceptions to no matches; transport errors lose their cause."""
     mapping = {
         "id": AppiumBy.ID, "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
         "xpath": AppiumBy.XPATH, "class_name": AppiumBy.CLASS_NAME,
@@ -261,6 +291,10 @@ def _find_elements(driver, locator):
 
 
 def _find_for_action(driver, action):
+    """Try locator candidates using one stored ordinal across their full live match sets.
+    
+    Missing occurrences return None. Filtered-vs-live ordinals and fallback match-set
+    differences remain a confirmed safe-mode targeting defect."""
     ordinal = int(action.get("ordinal", 0))
     for locator in action.get("locators", []):
         matches = _find_elements(driver, locator)
@@ -270,6 +304,10 @@ def _find_for_action(driver, action):
 
 
 def _tap(driver, platform, action):
+    """Try element click, native gesture, then coordinates only when no locators were recorded.
+    
+    The resolved element is not rechecked against safety policy here. Gesture
+    fallback can retry after a click exception; avoid interpreting this as idempotent."""
     element = _find_for_action(driver, action)
     if element is not None:
         try:
@@ -300,12 +338,14 @@ def _tap(driver, platform, action):
 
 
 def _scroll(driver, platform):
+    """Swipe downward through the visible window; no container or scroll-end evidence is returned."""
     size = driver.get_window_size()
     x = int(size["width"] * 0.5)
     driver.swipe(x, int(size["height"] * 0.78), x, int(size["height"] * 0.25), 450)
 
 
 def execute_action(driver, platform, action, settle_seconds=0.5):
+    """Execute a tap/down-scroll and sleep for stabilization; foreground checking belongs to replay."""
     if action["kind"] == "tap":
         _tap(driver, platform, action)
     elif action["kind"] == "scroll_down":
@@ -316,6 +356,7 @@ def execute_action(driver, platform, action, settle_seconds=0.5):
 
 
 def _input_value(rule):
+    """Resolve an input rule from its environment variable, falling back to an inline value."""
     if rule.get("env"):
         value = os.getenv(rule["env"])
         if value is not None:
@@ -324,6 +365,10 @@ def _input_value(rule):
 
 
 def fill_known_inputs(driver, platform, source, cfg):
+    """Fill recognized fields and return metadata plus blocked reasons without storing input values.
+    
+    Duplicate fields currently use ordinal zero; failed clearing is ignored. Inline
+    rule values also need complete redaction coverage before production use."""
     _, _, inputs = discover_actions(source, platform, cfg)
     rules = cfg.get("autoInputRules", [])
     filled, blocked = [], []
@@ -354,6 +399,7 @@ def fill_known_inputs(driver, platform, source, cfg):
 
 
 def _sensitive_values(cfg):
+    """Collect configured secrets and environment-backed input values for literal redaction."""
     values = list(cfg.get("sensitiveValues", []))
     for rule in cfg.get("autoInputRules", []):
         env_name = rule.get("env")
@@ -363,10 +409,15 @@ def _sensitive_values(cfg):
 
 
 def _redact_source(source, cfg):
+    """Apply literal hierarchy redaction; the current replacement can make XML invalid."""
     return redact_values(source, _sensitive_values(cfg))
 
 
 def _save_checkpoint(driver, platform, checkpoint, state_id, path_actions, out_root, cfg, metadata=None, recent_actions=None):
+    """Persist a screenshot, source.xml, and state.json under auto_crawl/checkpoint.
+    
+    Screenshot masks are storage privacy masks. Source redaction currently breaks XML
+    attributes; path/trace/metadata fields require additional secret sanitization."""
     folder = private_dir(Path(out_root) / "auto_crawl" / checkpoint)
     screenshot = folder / "screen.png"
     driver.save_screenshot(str(screenshot))
@@ -386,10 +437,12 @@ def _save_checkpoint(driver, platform, checkpoint, state_id, path_actions, out_r
 
 
 def _new_driver(server_url, runtime, platform):
+    """Create a target-specific Appium session using runner's shared capability construction."""
     return webdriver.Remote(server_url, options=_options(runtime, platform))
 
 
 def _foreground_context(driver, platform):
+    """Read Android package/activity or iOS bundle/pid, returning unknown fields on probe failure."""
     if platform == "android":
         package = None
         activity = None
@@ -410,6 +463,10 @@ def _foreground_context(driver, platform):
 
 
 def _assert_allowed_foreground(driver, platform, runtime, cfg, *, after_activation=False):
+    """Require a known target app or built-in/configured system surface after reset/action.
+    
+    Configured packages extend built-in allowances. after_activation currently does
+    not tighten the policy; an allowed system surface may satisfy this check."""
     context = _foreground_context(driver, platform)
     if platform == "android":
         expected = runtime.get("appPackage")
@@ -431,6 +488,10 @@ def _assert_allowed_foreground(driver, platform, runtime, cfg, *, after_activati
 
 
 def _run_reset_command(command, runtime, timeout):
+    """Expand udid/appId placeholders and run an operator-owned argument array without a shell.
+    
+    A zero exit code is trusted as reset evidence; app/binary preservation is an
+    operator contract, not independently verified by this helper."""
     if not isinstance(command, list) or not command:
         raise RuntimeError("resetCommand must be a non-empty JSON array")
     mapping = {
@@ -442,6 +503,11 @@ def _run_reset_command(command, runtime, timeout):
 
 
 def _prepare_path(driver, runtime, platform, cfg):
+    """Terminate, reset according to strategy, activate, and verify foreground; return reset determinism.
+    
+    Android pm clear preserves the binary but clears data/permissions. Simulator
+    reinstallation belongs only to virtual testing. Real iOS relaunch returns False.
+    Reset commands are trusted; explicit mode authorization is still incomplete."""
     app_id = runtime.get("appPackage") if platform == "android" else runtime.get("bundleId")
     if not app_id:
         # Virtual auto-run may let Appium infer the identity from the APK/.app.
@@ -511,6 +577,11 @@ def _prepare_path(driver, runtime, platform, cfg):
 
 
 def replay_path(server_url, runtime, platform, path_actions, cfg, driver=None):
+    """Return (driver, action trace, error, deterministic reset) after replay from launch.
+    
+    A caller-supplied driver remains caller-owned on failure. If this function
+    created the driver, it quits on replay failure and transfers ownership on success.
+    Session creation errors occur before the replay try block."""
     owns_driver = driver is None
     if driver is None:
         driver = _new_driver(server_url, runtime, platform)
@@ -548,6 +619,7 @@ def replay_path(server_url, runtime, platform, path_actions, cfg, driver=None):
 
 
 def _close_driver(driver):
+    """Best-effort Appium quit; callers own deciding when a failed session must be replaced."""
     if driver:
         try:
             driver.quit()
@@ -556,6 +628,11 @@ def _close_driver(driver):
 
 
 def crawl_baseline(server_url, runtime, platform, out_root, cfg):
+    """Breadth-first traversal of reset-to-launch action paths with checkpoint/graph persistence.
+    
+    First-seen fingerprints keep one representative path. Blocked/failed/truncated
+    branches and exhausted limits force PARTIAL; intermediate input and stable-state
+    checks still have gaps. Edges currently lack resolved destination state IDs."""
     max_screens = int(cfg.get("maxScreens", 120))
     max_depth = int(cfg.get("maxDepth", 12))
     max_total_paths = int(cfg.get("maxTotalPaths", 800))
@@ -669,6 +746,11 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
 
 
 def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_root, cfg):
+    """Replay baseline screen paths and capture candidate artifacts under baseline checkpoint names.
+    
+    reproducedScreens counts captures, not confirmed equivalent destinations. Failed
+    paths are retained separately; the returned reset flag is not fully propagated
+    by coverage_summary in this baseline."""
     reproduced, failures = 0, []
     driver = None
     deterministic_all = True
@@ -733,6 +815,10 @@ def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_ro
 
 
 def coverage_summary(baseline_graph, candidate_replay):
+    """Combine discovery/replay counts for reporting using baseline coverage and reset status.
+    
+    Candidate path failures are regression evidence. Candidate non-deterministic
+    resets and blocked inputs still need to affect validity during stabilization."""
     return {
         "mode": "automatic",
         "discoveredBaselineScreens": int(baseline_graph.get("discoveredScreens", 0)),

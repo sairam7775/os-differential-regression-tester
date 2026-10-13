@@ -1,136 +1,159 @@
-# OS Differential Regression Tester — v0.5 Hardened
+# OS Differential Regression Tester — v0.5.0
 
-A standalone local regression tool for comparing the **same mobile app build** across an old/stable OS and a new/candidate OS. The production-oriented workflow uses the **market-installed app on two physical devices** and automatically discovers/replays reachable UI states.
+Compare one mobile application version/build on baseline and candidate OS
+identities, using Appium to collect screenshots, native hierarchy, action traces,
+and timing evidence. The preferred production workflow uses the same
+market-installed app on two physical devices; developers do not rebuild that app.
 
-## Development baseline
+## Current development status
 
-See [the v0.5.0 baseline assessment](docs/BASELINE_ASSESSMENT.md) for actual test results, known safety and validity issues, and the prioritized stabilization plan. The imported baseline has not been validated on physical devices.
+This is the imported hardened baseline, with unresolved safety and validity
+defects. [The baseline assessment](docs/BASELINE_ASSESSMENT.md) records actual
+results, confirmed reproductions, and the prioritized stabilization plan. No
+physical-device, emulator/simulator, or live Appium validation has been performed.
+The local Claude review request is tracked in [PR #1](https://github.com/sairam7775/os-differential-regression-tester/pull/1);
+a running CLI command is not evidence of a completed review.
 
-## Primary workflow: `market-run`
+The baseline test attempt produced 14 passing methods, one test-method error,
+and two discovery errors; 38 test methods exist in source. Pillow was unavailable,
+and the iOS metadata test's partial Appium mock caused an import error.
+Do not describe the full suite as passing. Documentation and comments explain
+current behavior; they do not repair the known issues.
 
-The app must already be installed from Google Play or Apple App Store. The tool does **not** sideload, replace, upgrade, or downgrade the app under test.
+## Choose a mode
+
+| Command | Devices | App source | Execution |
+| --- | --- | --- | --- |
+| `market-run` | Two physical Android phones or iPhones | Already installed from the store; version/build equality is gated | Baseline discovery, candidate path replay |
+| `auto-run` | Android emulators or iOS simulators | Operator-supplied APK or Simulator `.app` | Baseline discovery, candidate path replay |
+| `run` | Android emulators or iOS simulators | Configured APK or Simulator `.app` | Explicit scenario steps/checkpoints |
+
+Virtual modes use the same configured binary path on both targets; they do not
+independently inspect installed version/build metadata as market mode does.
+iOS execution requires macOS and Xcode. `doctor`, `list-targets`,
+`list-real-devices`, and `open-report` are supporting commands.
+
+## Install and run locally
+
+Prerequisites: Python 3.10+, Node `^20.19.0 || ^22.12.0 || >=24`, npm 10+,
+Java/`JAVA_HOME` and Android platform-tools for Android, or macOS/Xcode/signing
+for iOS. Appium/driver pins are in `config/tool-versions.json`; Python dependency
+ranges are in `requirements.txt`.
+
+On Windows, from the repository root:
+
+```powershell
+.\scripts\setup-local.ps1
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\scripts\osdiff.ps1 doctor --mode market --platform android
+.\scripts\osdiff.ps1 list-real-devices
+```
+
+On macOS/Linux:
 
 ```bash
+./scripts/setup-local.sh
+./.venv/bin/python -m unittest discover -s tests -v
 ./scripts/osdiff.sh doctor --mode market --platform android
 ./scripts/osdiff.sh list-real-devices
-./scripts/osdiff.sh market-run \
-  --platform android \
-  --app-id com.example.app \
-  --baseline-device OLD_SERIAL \
-  --candidate-device NEW_SERIAL \
-  --open
 ```
 
-On iOS/macOS:
+Check dependency installation errors explicitly, particularly on Windows where
+the baseline setup script does not check every Python command's exit code.
+The CLI currently imports Pillow even for help/doctor; install Python dependencies
+before using those commands. See [quick start](docs/QUICKSTART.md) for preparation.
+
+## Physical-device market comparison
+
+Install the exact same market version/build on both dedicated devices, disable
+automatic app updates, align comparable environment settings, and use test accounts.
+After reviewing the [known safety defects](docs/BASELINE_ASSESSMENT.md), a configured
+Android command has this form:
 
 ```bash
-./scripts/osdiff.sh doctor --mode market --platform ios
 ./scripts/osdiff.sh market-run \
-  --platform ios \
-  --app-id com.example.app \
-  --baseline-device OLD_UDID \
-  --candidate-device NEW_UDID \
-  --ios-app-store-confirmed \
-  --open
+  --platform android --app-id com.example.app \
+  --baseline-device OLD_SERIAL --candidate-device NEW_SERIAL --open
 ```
 
-## Fail-closed provenance and environment gate
+For iOS on macOS:
 
-Before crawling, v0.5 verifies:
+```bash
+./scripts/osdiff.sh market-run \
+  --platform ios --app-id com.example.app \
+  --baseline-device OLD_UDID --candidate-device NEW_UDID \
+  --ios-app-store-confirmed --open
+```
 
-- two different physical devices;
-- same package/bundle ID;
-- exact same app version **and** build number;
-- different OS identity (marketing version/API/security patch/build as available);
-- market origin policy;
-- hardware model policy;
-- matching environment settings when both sides expose them (locale, timezone, font/display state, orientation, screen characteristics).
+These are command templates, not evidence that the baseline is safe or validated.
+All identifiers are placeholders. Market runtimes omit the Appium `app`
+capability. Android normally clears only app data/permissions between paths;
+it preserves the installed binary. iOS store origin requires operator attestation.
+See [market-mode details](docs/REAL_DEVICE_MARKET_MODE.md).
 
-A failed gate is `INVALID` and crawling does not start.
+## Reset, safety, and coverage
 
-## Deterministic branch isolation
+Android `android_clear_data` uses `pm clear`; real iOS `relaunch` does not reset
+app data. A configured external iOS reset command is trusted when it exits zero,
+and must preserve the store binary. Simulator reinstall is a virtual-mode operation.
 
-Automatic crawling replays many independent navigation paths. v0.5 treats state isolation as part of coverage validity.
+Baseline discovery records blockers, failures, truncation, and exhausted limits.
+`PARTIAL` automatic coverage makes the report `INVALID`. A branched baseline
+with relaunch-only reset is partial. Current candidate reset/input gaps are
+documented; `COMPLETE_WITHIN_POLICY` is not proof of complete app coverage.
 
-- **Android market mode:** default `android_clear_data`. The target app's data/permissions are cleared between paths with `pm clear`; the Google Play-installed binary remains installed. This makes app-state replay deterministic.
-- **iOS real device:** a relaunch cannot reliably clear App Store app state. Therefore automatic coverage is conservatively `PARTIAL` when multiple branches are explored unless `marketMode.iosResetCommand` is configured with a deterministic external reset hook.
-- **Virtual Android:** uses target-app data clear between auto-crawl paths.
-- **iOS Simulator:** reinstalls the same simulator `.app` between paths.
+Safe mode intends to block pairing, Bluetooth connections, printing/reprinting,
+firmware, purchases, and destructive actions. Deny patterns override allowed
+words, but a confirmed shared-locator defect can still target a blocked control.
+Keep safe mode enabled and fix live target resolution before hardware validation.
+Explicit scenarios do not apply crawler deny rules automatically. Never use
+automatic safe mode for printer or other hardware side effects.
 
-A non-deterministic reset can never produce `COMPLETE_WITHIN_POLICY` for a branched crawl.
+## Results and artifacts
 
-## Automatic discovery coverage
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Reported PASS/REVIEW with no reported High/Critical regression |
+| `1` | Setup/configuration/tool exception |
+| `2` | Reported candidate High/Critical regression |
+| `3` | INVALID comparison or incomplete automatic coverage |
+| `130` | Cancelled |
 
-The baseline crawler performs breadth-first exploration and records unique UI states. The candidate device replays the exact baseline paths.
-
-Coverage is forced to `PARTIAL` when any of these occur:
-
-- baseline path replay failure;
-- destructive/unsafe action blocked;
-- unknown required input;
-- action list truncated by `maxActionsPerScreen`;
-- depth/screen/path limit reached;
-- hierarchy parse failure;
-- non-deterministic branch reset.
-
-The report and CLI now use the same authoritative status. `PARTIAL` coverage produces an **INVALID** report banner and exit code `3`.
-
-## Safety
-
-Deny rules always win. A label such as **Continue to Pay** or **Continue to Print** remains blocked even though it also contains an allowed word such as `continue`.
-
-Default safe-mode blocks include destructive/expensive actions such as delete, erase, purchase, pay, send, submit, reset, print/reprint and firmware actions. Use `--unsafe-full-crawl` only with disposable test data and acceptable hardware side effects.
-
-Recognized Android/iOS system UI surfaces can be configured under `crawler.allowedSystemPackages`; unknown external apps stop the branch.
-
-## Security/privacy
-
-On POSIX systems, run folders are created owner-only (`0700`) and artifact files owner-only (`0600`). Test credential values are redacted from captured hierarchy XML. Device IDs are masked/hashed in persisted provenance. Optional screenshot masks can be configured in `artifactPrivacy.sensitiveRegions`.
-
-Use dedicated non-personal test accounts/data. `artifactPrivacy.retentionDays` can be set above `0` to delete old run directories automatically; `0` disables automatic retention cleanup.
-
-## Concurrency
-
-`run`, `auto-run`, and `market-run` are intentionally single-instance. A process lock prevents parallel runs from colliding on Appium/device resources. Run directories also include microseconds and a random token.
-
-## Output
+The intended compatibility sign-off also requires valid baseline evidence, exact
+app version/build, verified OS difference, complete explored scope, valid artifacts,
+and deterministic reset on both devices. Known baseline gaps mean exit zero alone
+is not sufficient evidence. Overall report precedence is INVALID, FAIL, REVIEW, PASS.
 
 ```text
-runs/<timestamp>-<token>-market-real/
-├── android/ or ios/
-│   ├── baseline/
-│   └── candidate/
-└── report/
-    ├── index.html
-    ├── comparison.json
-    ├── summary.json
-    ├── coverage.json
-    ├── device-provenance.json
-    └── assets/
+runs/<local-timestamp>-<token>[-mode]/
+  android/ or ios/
+    baseline/    # summaries, graph, scenario/checkpoint artifacts
+    candidate/   # summaries, replay result, corresponding artifacts
+  report/
+    index.html   # side-by-side images and scored differences
+    comparison.json
+    summary.json
+    assets/
+    coverage.json          # automatic modes
+    device-provenance.json # market mode
 ```
 
-The HTML report includes provenance, environment validation, coverage completeness, reset-isolation status, baseline replay failures, truncated actions, candidate path failures, screenshots, hierarchy changes, behavior failures, and timing regressions.
+Artifacts are local. POSIX permissions are applied best-effort; Windows ACLs are
+not configured. Screenshot masking is opt-in. Provenance masks/hashes primary
+device IDs, but errors and traces need further sanitization; current XML redaction
+can corrupt syntax. Use dedicated non-personal data and preserve artifact privacy.
+Retention is disabled by default; positive `retentionDays` deletes old run folders.
+The single-run lock also has known Windows and cleanup defects.
 
-## Result / exit codes
+## Developer reading order
 
-- `0` — valid complete comparison; no High/Critical regression.
-- `1` — setup/tool/configuration failure.
-- `2` — valid complete comparison with High/Critical candidate regression.
-- `3` — INVALID provenance/execution/hierarchy or PARTIAL automatic coverage.
-- `130` — cancelled.
+1. [Developer guide](docs/DEVELOPER_GUIDE.md): entry points, contracts, testing, and handoff.
+2. [Architecture](docs/ARCHITECTURE.md): data flow and resource ownership.
+3. [Configuration](docs/CONFIGURATION.md): every default field and CLI precedence.
+4. [Artifacts](docs/ARTIFACTS.md): JSON/XML/image field meanings and result semantics.
+5. [Baseline assessment](docs/BASELINE_ASSESSMENT.md): issues requiring fixes.
+6. [Future reference](docs/FUTURE_REFERENCE.md): priorities and next-review checklist.
 
-## Other modes
-
-- `auto-run` — automatic emulator/simulator discovery using an APK or Simulator `.app`.
-- `run` — deterministic scenario-based emulator/simulator comparison.
-
-## Golden rule
-
-> Change the OS, not the application build.
-
-If version/build differs, the tool refuses to treat the result as an OS differential comparison.
-
-
-## Hardware-state safety
-
-Automatic safe mode blocks **Pair / Connect / Bluetooth / Print / Reprint / Firmware** actions by default. App-state reset does not reset external printer or Bluetooth hardware state. Use explicit controlled hardware scenarios for these flows; otherwise the automatic coverage result remains partial.
+Agent instructions are in [AGENTS.md](AGENTS.md); Claude-specific orientation is in
+[CLAUDE.md](CLAUDE.md). Follow [automatic discovery](docs/AUTO_DISCOVERY.md) and
+[scenario format](docs/SCENARIOS.md) when extending existing behavior.

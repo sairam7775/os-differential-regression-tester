@@ -1,74 +1,56 @@
-# Future Reference — OS Differential Regression Tester v0.5
+# Future reference and developer handoff — v0.5.0
 
-## Purpose
+## Objective and current state
 
-Compare one unchanged mobile app build against two OS identities and detect candidate-OS UI, navigation, behavior and timing regressions.
+Detect OS-caused regressions in an unchanged Android/iOS production build, including
+INSTAX companion apps, without rebuilding or replacing the app. The supplied ZIP
+is imported, the baseline reviewed, and unresolved defects documented. No functional
+fixes or real-device validations are claimed by the comment/documentation update.
 
-## Preferred production mode
+Start with [developer guide](DEVELOPER_GUIDE.md), [architecture](ARCHITECTURE.md),
+[configuration](CONFIGURATION.md), [artifacts](ARTIFACTS.md), and
+[baseline assessment](BASELINE_ASSESSMENT.md). README is the user-facing entry point;
+AGENTS.md and CLAUDE.md at the root orient coding agents.
 
-Use `market-run` with the exact same store version/build already installed on two physical devices.
+## Evidence that must accompany the handoff
 
-## Sign-off invariants
+- Exact source commit and tool/dependency versions, not only release label.
+- Actual test count, failures/errors/skips, and installation blockers.
+- Distinction between compilation, synthetic probes, mocked tests, live Appium,
+  emulator/simulator, and physical-device evidence.
+- Current review PR/head and whether Claude returned an actual review.
+- Private storage of credentials, device identifiers, screenshots, and hierarchy.
 
-A run is not eligible for automated compatibility sign-off unless all are true:
+The original suite attempt had 14 passes and three error entries out of 17 loaded
+entries; there are 38 test methods in source. Pillow was unavailable and an iOS
+mock import failed. Read the assessment for exact commands and limitations.
 
-1. Provenance/environment gate passes.
-2. Baseline execution is valid.
-3. Automatic coverage is `COMPLETE_WITHIN_POLICY`.
-4. Branch reset isolation is deterministic when more than one path is explored.
-5. Hierarchy capture/parsing is valid.
-6. No High/Critical regression is present.
+## Priorities
 
-`PARTIAL` coverage is reported as `INVALID`, never as PASS.
+| Priority | Next work | Completion evidence |
+| --- | --- | --- |
+| 1 | Safe live-control resolution, Windows locking/cleanup, syntax-preserving privacy, fail-closed artifacts/assertions/traces/reset/identity, CLI/session/setup handling | Focused regressions, complete suite, independent Claude review |
+| 2 | Android physical market-run; iOS physical validation when macOS/signing/two iPhones are available | Actual private device evidence tied to commit and unchanged app version/build |
+| 3 | Stable state identity, graph destinations/action outcomes, duplicate controls, scoped scrolling/back/tabs/dialogs/dynamic content | Controlled discovery/replay fixtures and honest frontier metrics |
+| 4 | Meaningful text/control changes, crash/hang/action evidence, visual noise, timing/severity | Known-good/bad fixtures with false-positive and false-negative checks |
+| 5 | Full environment/build details, side-by-side reports, explicit blocker/scope reporting, installation guidance | Reviewer can explain status and limitations from one report |
 
-## Android real-device reset
+The [assessment](BASELINE_ASSESSMENT.md) lists concrete defect triggers and the
+proposed logical commit sequence. Stabilize the baseline before major features.
 
-`marketMode.androidResetStrategy = android_clear_data` is the default. It uses `adb shell pm clear <package>` between branches. The Google Play-installed package remains installed; only app data/permissions are reset.
+## Invariants
 
-## iOS real-device reset
+Preserve market-installed binaries and exact app version/build matching. Require
+positive OS/build/patch difference evidence. A skipped, blocked, or failed branch
+must never count as complete. Real iOS relaunch is not a reset. Printer/Bluetooth/
+firmware/purchase/destructive operations are excluded from automatic safe mode.
+Preserve privacy, report real validation honestly, and document justified
+compatibility changes. These requirements outrank optimistic feature metadata.
 
-A generic App Store app-data reset is not available through public XCUITest APIs. Default relaunch-only branch isolation is therefore non-deterministic. Branched iOS automatic discovery remains `PARTIAL` unless `marketMode.iosResetCommand` supplies a deterministic reset hook.
+## Before closing a fix
 
-## Coverage blockers
-
-- baseline replay failure;
-- blocked destructive action;
-- missing test input;
-- action truncation;
-- crawler depth/screen/path limit;
-- non-deterministic branch reset.
-
-## Safety
-
-Deny rules always win. Examples such as `Continue to Pay` and `Continue to Print` remain blocked. Unknown external apps stop a path; explicitly allowed Android/iOS system UI may be captured.
-
-## Privacy
-
-POSIX run directories are `0700`; files are `0600`. Test credential values are redacted from XML. Persisted device IDs are masked/hashed. Configure `artifactPrivacy.sensitiveRegions` to black out sensitive screenshot areas. Set `artifactPrivacy.retentionDays` > 0 for automatic cleanup of old run directories.
-
-## Doctor commands
-
-```bash
-./scripts/osdiff.sh doctor --mode market --platform android
-./scripts/osdiff.sh doctor --mode market --platform ios
-./scripts/osdiff.sh doctor --mode virtual --platform android
-```
-
-## Exit codes
-
-```text
-0   valid complete comparison, no High/Critical regression
-1   setup/tool/configuration error
-2   valid complete comparison with High/Critical regression
-3   invalid/incomplete/partial comparison
-130 cancelled
-```
-
-## INSTAX guidance
-
-Keep safe mode on for normal automatic crawling. Print/reprint/firmware/reset/payment side effects should remain blocked and be covered by explicit controlled hardware scenarios.
-
-
-## Hardware-state safety
-
-Automatic safe mode blocks **Pair / Connect / Bluetooth / Print / Reprint / Firmware** actions by default. App-state reset does not reset external printer or Bluetooth hardware state. Use explicit controlled hardware scenarios for these flows; otherwise the automatic coverage result remains partial.
+Reproduce the issue, implement the smallest correct change, add a regression,
+run relevant checks, inspect error/cleanup/exit-code behavior, and update the
+corresponding known-issue comments and assessment status. Have Claude or another
+reviewer verify the exact diff. Do not merge or claim release validation based on
+an unanswered review request.

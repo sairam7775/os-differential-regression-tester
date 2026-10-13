@@ -1,133 +1,81 @@
-# Scenarios — v0.5 Context
+# Explicit scenario format
 
-Scenario mode remains available for controlled flows. For hardware companion applications, use explicit scenarios for print, firmware, reset, payment or other side-effecting operations rather than disabling crawler safety globally.
+Scenario mode (`run`) uses virtual devices and operator-supplied APK/Simulator
+`.app` binaries. It provides deterministic step intent, not automatic safe-mode
+policy. Crawler deny rules do not apply to explicit scenarios. Review every
+action and use dedicated test data; no destructive production/hardware operations.
 
----
+## Root fields
 
-# Scenario format
+| Field | Meaning |
+| --- | --- |
+| `name` | Scenario artifact directory and summary identity; use a unique simple name |
+| `description` | Informational text; not used by the runner |
+| `platforms` | Optional platform applicability, normally `android`/`ios` |
+| `steps` | Ordered action/checkpoint dictionaries |
 
-Scenarios are JSON and are intentionally explicit.
+Names/checkpoint IDs become local paths; keep trusted identifiers without absolute
+paths or `..`. Repeated names/IDs can overwrite artifact or summary identity.
+The sample core_navigation IDs are placeholders, not INSTAX app identifiers.
 
-## Actions
+## Steps and locators
 
-Supported:
+| Type | Main fields | Behavior |
+| --- | --- | --- |
+| `tap` | `locator`, optional `timeout` | Wait for presence and click |
+| `type_text` | `locator`, `text`, optional `clear`, `timeout` | Expand env variables and send keys; failed clearing is ignored |
+| `wait_for` | `locator`, optional `timeout` | Wait for presence, not necessarily visibility |
+| `sleep` | `seconds` | Fixed pause |
+| `back` | none | Driver back action |
+| `swipe` | `startX/startY/endX/endY`, `durationMs` | Window-relative coordinates |
+| `terminate_app` | `appId` | Terminate specified app |
+| `activate_app` | `appId` | Activate specified app |
+| `checkpoint` | `id`, optional `assertions`, `settleSeconds` | Readiness assertions, settling, screenshot/hierarchy/state capture |
 
-- `tap`
-- `type_text`
-- `wait_for`
-- `sleep`
-- `back`
-- `swipe`
-- `terminate_app`
-- `activate_app`
-- `checkpoint`
+Non-checkpoint steps may set `platforms` and `continueOnFailure`. The latter
+records a failed action and continues; current scenario status can still be
+passed. Failure evidence after the last checkpoint requires summary validation.
+`secure` is an example metadata hint on text entry; it does not enforce redaction.
 
-## Locator strategies
-
-Preferred order:
-
-1. `accessibility_id`
-2. native ID
-3. iOS predicate / class chain or Android UIAutomator
-4. XPath only when necessary
-
-Stable accessibility IDs make the same scenario usable across OS versions.
-
-## Checkpoints
-
-A checkpoint captures:
-
-- screenshot
-- UI/accessibility hierarchy
-- assertions
-- actions since the prior checkpoint
-- screen size
-
-Example:
+Locator shapes are shared `{strategy, value}` or per-platform dictionaries:
 
 ```json
-{
-  "type": "checkpoint",
-  "id": "settings",
-  "assertions": [
-    {
-      "type": "element_present",
-      "locator": {
-        "android": {"strategy": "accessibility_id", "value": "settings_title"},
-        "ios": {"strategy": "accessibility_id", "value": "settings_title"}
-      }
-    }
-  ]
-}
+{"android": {"strategy": "accessibility_id", "value": "home_title"},
+ "ios": {"strategy": "accessibility_id", "value": "home_title"}}
 ```
 
-## Assertions
+Strategies: `accessibility_id`, `id`, `xpath`, `class_name`,
+`android_uiautomator`, `ios_predicate`, `ios_class_chain`. Prefer stable IDs.
+Neither strategy validation nor sample locators establish that an intended
+control exists on a real application; replace placeholders and test readiness.
 
-Supported:
+## Assertions and capture
 
-- `element_present`
-- `text_equals`
-- `enabled`
-- `displayed`
-
-## Recommended screen inventory
-
-Cover both normal app screens and OS-sensitive integrations:
-
-- cold launch / splash
-- login / authentication
-- home / navigation
-- lists and details
-- search
-- create/edit
-- settings/profile
-- permissions
-- camera
-- photo picker
-- file picker
-- notifications
-- deep links
-- biometrics
-- keyboard/input
-- background → foreground
-- offline → online recovery
-- dark mode
-- large text / accessibility
-- logout
-- upgrade/migration-sensitive flows
-
-Do not put destructive production actions in automated scenarios.
-
-## v0.2 permission testing guidance
-
-Android permissions are not auto-granted by default. Treat permission prompts as explicit OS-sensitive scenarios where possible, especially:
-
-- notifications
-- photos/media
-- camera
-- microphone
-- foreground/background location
-- Bluetooth / nearby devices
-
-A permission scenario should checkpoint the app state before requesting permission, perform the action that triggers the system prompt, then assert the post-decision app state. System prompt locators can differ across OS versions, so keep platform/version-specific steps isolated rather than weakening the normal app-screen assertions.
-
-## Checkpoint readiness
-
-Checkpoint assertions run before screenshot/UI hierarchy capture. Use assertions to prove the intended screen is ready. You can override stabilization per checkpoint:
+Assertions support `element_present`, `text_equals`, `enabled`, and `displayed`,
+with `locator`, optional `timeout`, and `value` for comparisons. Text expectations
+expand environment variables. Assertions return passed/message records rather
+than raising; false assertions currently do not stop checkpoint capture.
 
 ```json
-{
-  "type": "checkpoint",
-  "id": "home",
-  "settleSeconds": 0.5,
-  "assertions": [
-    {
-      "type": "element_present",
-      "locator": {
-        "android": {"strategy": "accessibility_id", "value": "home_screen"},
-        "ios": {"strategy": "accessibility_id", "value": "home_screen"}
-      }
-    }
-  ]
-}
+{"type": "checkpoint", "id": "home", "settleSeconds": 0.5,
+ "assertions": [{"type": "element_present",
+   "locator": {"strategy": "accessibility_id", "value": "home_title"}}]}
 ```
+
+Assertions run before screenshots/source. Each checkpoint persists actions since
+the previous checkpoint, window size, and capture epoch. Session startup/step
+exceptions return failed scenario details and attempt quit. Baseline assertion
+failures are not yet fully invalidated by the comparator; see the assessment.
+
+## Credentials and OS-sensitive flows
+
+Use `${TEST_USER_EMAIL}`/`${TEST_USER_PASSWORD}` environment references in trusted
+scenario files; `.env` is not automatically loaded. Current assertions/errors and
+raw hierarchy redaction have privacy gaps, so do not use personal credentials.
+Set storage screenshot masks separately from comparison ignore masks.
+
+Cover camera/photo/file picker, permissions, keyboards, accessibility, background/
+foreground, offline recovery, and navigation with explicit checkpoints. OS-sensitive
+system locators can differ; maintain meaningful assertions instead of weakening
+validity. Real printer/firmware/payment flows require a separately reviewed hardware
+test process and do not belong in automatic safe-mode crawling.

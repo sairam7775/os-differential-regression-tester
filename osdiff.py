@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""Command-line orchestration for OS differential comparisons.
+
+Market mode inspects two preinstalled physical-device builds. Virtual modes
+provision emulators/simulators and use an operator-supplied binary. This module
+owns Appium process handles, run directories, report generation, and exit codes.
+See docs/DEVELOPER_GUIDE.md for the call graph and docs/BASELINE_ASSESSMENT.md
+for unresolved validity, locking, and privacy issues in the imported baseline.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +36,7 @@ from osdiff.fsutil import private_dir, write_json
 
 
 def load_config(path):
+    """Read JSON and attach the absolute config path/directory for relative resolution."""
     p = Path(path).resolve()
     cfg = json.loads(p.read_text(encoding="utf-8"))
     cfg["_configPath"] = str(p)
@@ -35,6 +45,7 @@ def load_config(path):
 
 
 def resolve_path(cfg, value):
+    """Expand user/environment references; resolve relative paths beside the config file."""
     p = Path(os.path.expandvars(str(value))).expanduser()
     if p.is_absolute():
         return str(p.resolve())
@@ -43,10 +54,12 @@ def resolve_path(cfg, value):
 
 
 def command_exists(cmd):
+    """Check PATH availability only; this does not prove the command can execute."""
     return shutil.which(cmd) is not None
 
 
 def appium_bin():
+    """Prefer the tool-local Appium launcher, then fall back to PATH."""
     local = (
         TOOL_ROOT
         / ".node"
@@ -60,6 +73,7 @@ def appium_bin():
 
 
 def appium_env():
+    """Copy the process environment and select the tool-local Appium driver home if present."""
     env = os.environ.copy()
     local_home = TOOL_ROOT / ".appium"
     if local_home.exists():
@@ -68,6 +82,7 @@ def appium_env():
 
 
 def appium_ready(url):
+    """Treat HTTP 200 from serverUrl/status as ready; payload validity is not checked yet."""
     endpoint = url.rstrip("/") + "/status"
     try:
         with urllib.request.urlopen(endpoint, timeout=1.5) as response:
@@ -77,6 +92,7 @@ def appium_ready(url):
 
 
 def _redact_file(path, env_names):
+    """Best-effort literal secret replacement in a server log; other artifacts are unaffected."""
     path = Path(path)
     if not path.exists():
         return
@@ -92,6 +108,10 @@ def _redact_file(path, env_names):
 
 
 def start_appium(cfg, run_root=None):
+    """Reuse a responding server or start a local server and return its ownership handle.
+    
+    An external server is never stopped by this tool. Base-path/TLS/address support
+    and startup-failure process cleanup need further validation."""
     appium_cfg = cfg.get("appium", {})
     url = appium_cfg.get("serverUrl", "http://127.0.0.1:4723")
     if appium_ready(url):
@@ -157,6 +177,7 @@ def start_appium(cfg, run_root=None):
 
 
 def stop_appium(handle, cfg):
+    """Stop only an owned Appium process, redact its log, and remove the log unless retained."""
     if not handle:
         return
     proc = handle.get("process")
@@ -182,6 +203,10 @@ def stop_appium(handle, cfg):
 
 
 def _cleanup_old_runs(cfg):
+    """Best-effort removal of old run directories when retentionDays is positive.
+    
+    Age uses directory mtime; zero disables cleanup. This deletes local artifacts,
+    so use a tool-owned runs directory and dedicated test data."""
     days = int((cfg or {}).get("artifactPrivacy", {}).get("retentionDays", 0) or 0)
     if days <= 0:
         return
@@ -199,6 +224,7 @@ def _cleanup_old_runs(cfg):
 
 
 def _new_run_root(suffix="", cfg=None):
+    """Create a private run directory named by local time, microseconds, token, and mode suffix."""
     _cleanup_old_runs(cfg)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     token = uuid.uuid4().hex[:8]
@@ -207,6 +233,10 @@ def _new_run_root(suffix="", cfg=None):
 
 
 def _pid_alive(pid):
+    """Probe a lock owner's PID; the current os.kill(pid, 0) is unsafe on Windows.
+    
+    Do not call this against a live Windows process as a diagnostic. Replace the
+    probe as described in docs/BASELINE_ASSESSMENT.md before relying on the lock."""
     try:
         os.kill(int(pid), 0)
         return True
@@ -215,6 +245,10 @@ def _pid_alive(pid):
 
 
 def _acquire_run_lock():
+    """Create the tool-root lock exclusively, attempting stale-PID recovery if it exists.
+    
+    The lock covers only this tool directory. Liveness, PID reuse, and stale-owner
+    races remain unresolved; the caller must arrange release on every exit path."""
     lock = TOOL_ROOT / ".osdiff-run.lock"
     try:
         fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -239,6 +273,7 @@ def _acquire_run_lock():
 
 
 def _release_run_lock(lock):
+    """Best-effort lock-file removal; main currently does not call this helper."""
     if lock:
         try:
             Path(lock).unlink(missing_ok=True)
@@ -246,12 +281,14 @@ def _release_run_lock(lock):
             pass
 
 def scenario_files(args):
+    """Resolve explicit scenario arguments from cwd, or enumerate tool-local JSON examples."""
     if args.scenario:
         return [str(Path(s).resolve()) for s in args.scenario]
     return [str(p.resolve()) for p in sorted((TOOL_ROOT / "scenarios").glob("*.json"))]
 
 
 def runtime_for(cfg, platform_name, target, info):
+    """Build virtual-target Appium/reset settings with config-relative app paths and privacy inputs."""
     platform_cfg = cfg[platform_name]
     out = {
         "udid": info["udid"],
@@ -286,6 +323,7 @@ def runtime_for(cfg, platform_name, target, info):
 
 
 def ensure_app(path, platform_name):
+    """Check binary existence and expected extension; app version/signature is not inspected."""
     app = Path(path)
     if not app.exists():
         raise RuntimeError(f"{platform_name} app not found: {app}")
@@ -298,10 +336,12 @@ def ensure_app(path, platform_name):
 
 
 def _summaries_have_failures(summary):
+    """Identify non-passed scenario statuses; nested assertions/actions need separate validation."""
     return any(entry.get("status") != "passed" for entry in summary)
 
 
 def run_one_platform(cfg, platform_name, run_root, scenarios):
+    """Run baseline then candidate virtual targets, always attempting to stop each owned device."""
     from osdiff.runner import run_target
     server = cfg["appium"].get("serverUrl", "http://127.0.0.1:4723")
     platform_cfg = cfg[platform_name]
@@ -420,6 +460,7 @@ def run_one_platform(cfg, platform_name, run_root, scenarios):
 
 
 def _apply_auto_overrides(cfg, args, platform_name):
+    """Apply explicit binary/OS/device overrides in-place; --app clears inferred app identity."""
     platform_cfg = cfg[platform_name]
     if getattr(args, "app", None):
         platform_cfg["appPath"] = str(Path(args.app).expanduser().resolve())
@@ -450,6 +491,7 @@ def _apply_auto_overrides(cfg, args, platform_name):
 
 
 def auto_crawl_one_platform(cfg, platform_name, run_root):
+    """Provision two virtual targets, discover baseline paths, replay candidate, and summarize coverage."""
     from osdiff.crawler import crawl_baseline, replay_candidate_graph, coverage_summary
 
     server = cfg["appium"].get("serverUrl", "http://127.0.0.1:4723")
@@ -576,6 +618,7 @@ def auto_crawl_one_platform(cfg, platform_name, run_root):
 
 
 def auto_run_cmd(args):
+    """Orchestrate virtual automatic discovery, artifacts, comparison, and the 0/2/3 result codes."""
     cfg = load_config(args.config)
     platforms = ["android", "ios"] if args.platform == "all" else [args.platform]
     if args.platform == "all" and getattr(args, "app", None):
@@ -652,6 +695,7 @@ def auto_run_cmd(args):
         stop_appium(appium_handle, cfg)
 
 def _version_tuple(text):
+    """Extract a three-part numeric version for prerequisite checks, or return None."""
     match = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text or "")
     if not match:
         return None
@@ -659,6 +703,7 @@ def _version_tuple(text):
 
 
 def _node_supported(version):
+    """Apply the Node engine ranges used by this tool's setup scripts."""
     if not version:
         return False
     major, minor, _ = version
@@ -666,6 +711,7 @@ def _node_supported(version):
 
 
 def _run_version(cmd, args):
+    """Run a bounded version command and return its code and stdout/stderr detail."""
     try:
         result = subprocess.run([cmd, *args], text=True, capture_output=True, timeout=10)
         return result.returncode, (result.stdout or result.stderr).strip()
@@ -674,6 +720,7 @@ def _run_version(cmd, args):
 
 
 def _appium_doctor(driver_name):
+    """Run the selected driver's prerequisite checks in the tool-local Appium environment."""
     exe = appium_bin()
     if not exe:
         return False, "Appium not found"
@@ -692,6 +739,7 @@ def _appium_doctor(driver_name):
 
 
 def doctor(args):
+    """Report mode/platform prerequisites; passing checks is not device or signing validation."""
     cfg = load_config(args.config)
     rows = []
 
@@ -767,6 +815,7 @@ def doctor(args):
 
 
 def list_targets(args):
+    """Print configured virtual-target availability; emulator listing currently lacks a timeout."""
     print("\nAndroid AVDs")
     emulator = devices.emulator_path()
     if emulator:
@@ -788,6 +837,7 @@ def list_targets(args):
 
 
 def open_report(args):
+    """Resolve a report file/directory and open its existing local HTML page."""
     path = Path(args.report).resolve()
     if path.is_dir():
         path = path / "index.html"
@@ -798,6 +848,7 @@ def open_report(args):
 
 
 def run_cmd(args):
+    """Run explicit scenarios on enabled virtual platforms and return comparison exit status."""
     cfg = load_config(args.config)
     scenarios = scenario_files(args)
     if not scenarios:
@@ -854,6 +905,7 @@ def run_cmd(args):
 
 
 def list_real_devices_cmd(args):
+    """List authorized Android serials and Xcode-listed iOS devices without running the app."""
     from osdiff import market
 
     print("\nAndroid physical devices")
@@ -911,6 +963,7 @@ def list_real_devices_cmd(args):
 
 
 def _market_invalid_result(platform_name, validation):
+    """Create the synthetic INVALID report row for a failed provenance/environment gate."""
     reasons = list(validation.get("errors") or [])
     if not reasons:
         reasons = ["market_provenance_validation_failed"]
@@ -930,7 +983,10 @@ def _market_invalid_result(platform_name, validation):
 
 
 def market_run_cmd(args):
-    """Run automatic differential crawling against preinstalled market builds."""
+    """Verify preinstalled builds, crawl baseline, replay candidate, and write market evidence.
+    
+    No app binary is supplied by the normal market runtime. Preflight identity
+    checks and policy-derived coverage still have the gaps in the baseline assessment."""
     from osdiff import market
     from osdiff.crawler import crawl_baseline, replay_candidate_graph, coverage_summary
 
@@ -1095,6 +1151,10 @@ def market_run_cmd(args):
         stop_appium(appium_handle, cfg)
 
 def main():
+    """Parse CLI arguments and translate execution errors/cancellation into process exit codes.
+    
+    Known lifecycle defect: the acquired run lock has no cleanup finally block.
+    Documentation additions do not repair this behavior."""
     parser = argparse.ArgumentParser(
         prog="osdiff",
         description="Local old-OS vs new-OS mobile differential regression tester",

@@ -1,3 +1,11 @@
+"""Execute explicit scenario steps and capture readiness-checked checkpoints.
+
+A scenario owns its Appium session and always attempts quit after execution.
+Checkpoint artifacts feed osdiff.compare; a returned status alone is not proof
+that all assertions/actions succeeded. See docs/SCENARIOS.md for the JSON format
+and docs/BASELINE_ASSESSMENT.md for continued-action and assertion validity gaps.
+"""
+
 from __future__ import annotations
 
 import json
@@ -16,6 +24,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 
 def _loc(platform, spec):
+    """Translate a platform-specific or shared scenario locator into Selenium/Appium strategy/value."""
     if platform in spec:
         spec = spec[platform]
     strategy = spec["strategy"]
@@ -35,11 +44,16 @@ def _loc(platform, spec):
 
 
 def _find(driver, platform, locator, timeout=10):
+    """Wait for locator presence, not automatically for visibility or clickability."""
     by, value = _loc(platform, locator)
     return WebDriverWait(driver, timeout).until(lambda d: d.find_element(by, value))
 
 
 def _assertion(driver, platform, assertion):
+    """Evaluate a checkpoint assertion and return passed/message metadata without raising.
+    
+    Messages may contain actual/expected text and are not yet comprehensively
+    redacted; failed baseline assertions need stronger comparator invalidation."""
     result = {"type": assertion.get("type"), "passed": False, "message": ""}
     try:
         typ = assertion["type"]
@@ -80,12 +94,11 @@ def _assertion(driver, platform, assertion):
 
 
 def _options(runtime, platform):
-    """Build Appium options.
-
-    In market/preinstalled mode, intentionally omit the `app` capability so Appium
-    never installs or replaces the application under test. The session launches the
-    already-installed store build by package/bundle identifier.
-    """
+    """Build target-specific Appium options; preinstalled mode omits the app binary.
+    
+    Explicit udid prevents implicit device selection. The caller supplies reset
+    semantics; market helpers set preinstalled=True and noReset=True. Never add
+    install/replacement capabilities to the normal market runtime."""
     preinstalled = bool(runtime.get("preinstalled", False))
     app_path = runtime.get("appPath")
     app = str(Path(app_path).resolve()) if app_path else None
@@ -120,6 +133,10 @@ def _options(runtime, platform):
 
 
 def _execute(driver, platform, step):
+    """Execute one explicit scenario action; safe-mode crawler deny rules do not apply to scenarios.
+    
+    Operators must review scenario side effects. type_text expands environment
+    variables, while its secure marker is not an enforced privacy mechanism."""
     typ = step["type"]
     if typ == "tap":
         _find(driver, platform, step["locator"], step.get("timeout", 10)).click()
@@ -155,6 +172,10 @@ def _execute(driver, platform, step):
 
 
 def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle_seconds, sensitive_env_names=None, sensitive_regions=None):
+    """Evaluate readiness assertions, settle, and persist screenshot/source/state artifacts.
+    
+    Assertions returning false do not stop capture. recentActions covers steps since
+    the prior checkpoint, so actions after the final checkpoint need summary checks."""
     folder = private_dir(out_root / scenario_name / step["id"])
 
     # Assertions act as readiness checks. Capture only after they have completed,
@@ -185,6 +206,10 @@ def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle
 
 
 def run_scenario(server_url, runtime, platform, scenario, out_root):
+    """Own one Appium session and return scenario status, actions, captured IDs, and failure detail.
+    
+    continueOnFailure records a failed action but can still return status passed.
+    Session quit is attempted in finally; cleanup failures are not surfaced yet."""
     driver = None
     run = {
         "scenario": scenario["name"],
@@ -247,6 +272,7 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
 
 
 def run_target(server_url, runtime, platform, scenarios, output):
+    """Load platform-applicable scenario files, execute them sequentially, and write run-summary.json."""
     out = private_dir(output)
     summary = []
     for scenario_path in scenarios:

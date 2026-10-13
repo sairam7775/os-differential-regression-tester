@@ -1,3 +1,10 @@
+"""Provision and stop virtual Android/iOS targets with explicit runtime identity.
+
+These helpers may install SDK images, recreate named AVDs/simulators, wipe virtual
+device data, and stop owned processes. Physical market-run uses osdiff.market
+instead. Every ADB operation on an owned emulator must include its selected serial.
+"""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +18,7 @@ from pathlib import Path
 
 
 def _run(args, check=True, capture=True, env=None, input_text=None, timeout=120):
+    """Run a bounded SDK/ADB/simctl command, raising on timeout or checked nonzero exit."""
     try:
         p = subprocess.run(
             args,
@@ -28,14 +36,17 @@ def _run(args, check=True, capture=True, env=None, input_text=None, timeout=120)
 
 
 def which(name):
+    """Resolve a tool through PATH without executing it."""
     return shutil.which(name)
 
 
 def android_sdk_root():
+    """Prefer ANDROID_SDK_ROOT, then ANDROID_HOME."""
     return os.getenv("ANDROID_SDK_ROOT") or os.getenv("ANDROID_HOME")
 
 
 def sdk_tool(name):
+    """Find command-line tools in known SDK layouts before falling back to PATH."""
     root = android_sdk_root()
     candidates = []
     if root:
@@ -52,6 +63,7 @@ def sdk_tool(name):
 
 
 def emulator_path():
+    """Find the SDK's platform-specific emulator executable or its PATH alternative."""
     root = android_sdk_root()
     exe = "emulator.exe" if platform.system() == "Windows" else "emulator"
     if root and (Path(root) / "emulator" / exe).exists():
@@ -60,6 +72,7 @@ def emulator_path():
 
 
 def adb_path():
+    """Find SDK platform-tools ADB or PATH; market helpers do not yet share this lookup."""
     root = android_sdk_root()
     exe = "adb.exe" if platform.system() == "Windows" else "adb"
     if root and (Path(root) / "platform-tools" / exe).exists():
@@ -68,6 +81,7 @@ def adb_path():
 
 
 def _adb_serials(adb):
+    """List authorized ADB targets to avoid emulator serial collisions."""
     lines = _run([adb, "devices"], check=False).splitlines()
     return {
         line.split()[0]
@@ -77,10 +91,10 @@ def _adb_serials(adb):
 
 
 def choose_emulator_port(adb=None, start=5554, stop=5680):
-    """Choose an unused even emulator console port.
-
-    The returned emulator serial is deterministically ``emulator-<port>``.
-    """
+    """Choose a currently unused even console port and its deterministic emulator serial.
+    
+    The socket check is not a reservation; the single-run lock does not cover
+    other programs that could claim the port before emulator startup."""
     used_serials = _adb_serials(adb) if adb else set()
     for port in range(start, stop + 1, 2):
         if f"emulator-{port}" in used_serials:
@@ -97,10 +111,12 @@ def choose_emulator_port(adb=None, start=5554, stop=5680):
 
 
 def _delete_avd(avdmanager, avd):
+    """Request deletion of the named virtual device; failure is ignored by the baseline."""
     _run([avdmanager, "delete", "avd", "--name", avd], check=False)
 
 
 def _create_avd(avdmanager, image, avd, device):
+    """Create/replace a named AVD with the requested SDK image and device profile."""
     try:
         p = subprocess.run(
             [
@@ -124,6 +140,10 @@ def prepare_android(
     recreate=True,
     boot_timeout_seconds=240,
 ):
+    """Install the requested image, launch an isolated emulator, and verify actual API level.
+    
+    The returned handle owns its process, ADB path, serial, port, and log. Data is
+    wiped and animations disabled on this virtual target; errors attempt cleanup."""
     sdkmanager = sdk_tool("sdkmanager")
     avdmanager = sdk_tool("avdmanager")
     emulator = emulator_path()
@@ -235,6 +255,7 @@ def prepare_android(
 
 
 def stop_android(info):
+    """Kill the owned emulator by explicit serial, then wait/terminate/kill its process."""
     if not info:
         return
     try:
@@ -257,6 +278,7 @@ def stop_android(info):
 
 
 def ios_runtimes():
+    """Return available Xcode simulator runtimes on macOS, or an empty list on other hosts."""
     if platform.system() != "Darwin":
         return []
     data = json.loads(_run(["xcrun", "simctl", "list", "runtimes", "-j"]))
@@ -264,6 +286,7 @@ def ios_runtimes():
 
 
 def _matching_ios_runtime(runtime_version):
+    """Select an exact version first, then an unambiguous runtime name match."""
     requested = str(runtime_version)
     runtimes = ios_runtimes()
     exact = [r for r in runtimes if str(r.get("version")) == requested]
@@ -280,6 +303,10 @@ def _matching_ios_runtime(runtime_version):
 
 
 def prepare_ios(runtime_version, device_type, sim_name, recreate=True):
+    """Create/reuse and boot a named simulator, verifying its requested runtime identifier.
+    
+    Matching/mismatched named simulators can be deleted. These operations must not
+    be used as physical iPhone or market-installed app reset mechanisms."""
     if platform.system() != "Darwin":
         raise RuntimeError("iOS Simulator testing requires macOS with Xcode.")
 
@@ -355,6 +382,7 @@ def prepare_ios(runtime_version, device_type, sim_name, recreate=True):
 
 
 def stop_ios(info):
+    """Attempt to shut down only the returned simulator UDID; shutdown errors are ignored."""
     if not info:
         return
     try:

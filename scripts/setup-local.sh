@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Install local automation dependencies, not a production market app binary.
+# Android SDK/Java and macOS Xcode/signing remain operator-owned prerequisites.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,6 +12,7 @@ node -e 'const [M,m]=process.versions.node.split(".").map(Number); if (!((M===20
 node -e 'const {execFileSync}=require("child_process"); const v=execFileSync("npm",["--version"],{encoding:"utf8"}).trim(); const M=Number(v.split(".")[0]); if (M<10) { console.error(`Unsupported npm ${v}. Need npm >=10.`); process.exit(1); }'
 
 echo "== Python environment =="
+# Keep all Python dependencies in this checkout so wrappers select a predictable interpreter.
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
@@ -37,6 +40,7 @@ export APPIUM_HOME="$PWD/.appium"
 "$APPIUM" driver install "uiautomator2@${UIA_VERSION}"
 
 if [ "$(uname -s)" = "Darwin" ]; then
+  # XCUITest is installed only on macOS; a driver install does not validate iPhone signing.
   "$APPIUM" driver uninstall xcuitest >/dev/null 2>&1 || true
   "$APPIUM" driver install "xcuitest@${XCU_VERSION}"
 fi

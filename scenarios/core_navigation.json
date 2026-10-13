@@ -1,6 +1,6 @@
 {
   "name": "core_navigation",
-  "description": "Replace these sample accessibility IDs with your app identifiers.",
+  "description": "Synthetic locator example for virtual-device scenario mode, not a validated INSTAX flow. Replace accessibility IDs with verified app controls. Set TEST_USER_EMAIL and TEST_USER_PASSWORD in the process environment; .env is not loaded automatically. The secure marker is informational and scenario actions do not apply crawler deny rules. Use dedicated test data and see docs/SCENARIOS.md before execution.",
   "platforms": [
     "android",
     "ios"

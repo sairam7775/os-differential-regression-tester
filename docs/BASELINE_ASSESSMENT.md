@@ -17,6 +17,12 @@ The review covered README, CHANGELOG, all documentation, all eight Python
 source files, all three test modules, configuration, scenarios, and scripts.
 No functional code changes have been made in this assessment.
 
+Developer comment/documentation follow-up: module/helper docstrings, the README,
+configuration/scenario explanations, artifact contracts, and agent handoff guidance
+now describe these limitations directly. Read `DEVELOPER_GUIDE.md`,
+`CONFIGURATION.md`, and `ARTIFACTS.md` alongside this historical assessment.
+Executable behavior remains the imported baseline; no issue below is marked fixed.
+
 ### Actual automated test results
 
 Environment: Windows, Python 3.14.7, project-local virtual environment.

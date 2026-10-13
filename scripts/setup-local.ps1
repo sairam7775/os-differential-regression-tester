@@ -1,3 +1,5 @@
+# Install project-local Python/Appium tools; this does not install the app under test.
+# Read docs/QUICKSTART.md first. Java/ADB and real-device authorization are external prerequisites.
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
@@ -11,6 +13,8 @@ $npmVersion = (npm --version).Trim()
 if ([int]($npmVersion.Split('.')[0]) -lt 10) { throw "Unsupported npm $npmVersion. Need npm >=10." }
 
 Write-Host "== Python environment =="
+# Known baseline gap: native Python exit codes below are not explicitly checked.
+# A successful final message is not proof that every dependency installation succeeded.
 python -m venv .venv
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
 & .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -25,6 +29,7 @@ npm install --prefix .node "appium@$AppiumVersion"
 if ($LASTEXITCODE -ne 0) { throw "Appium installation failed." }
 
 $env:APPIUM_HOME = (Resolve-Path .appium).Path
+# Driver replacement is scoped to this tool's .appium directory, not the tested app.
 $Appium = ".\.node\node_modules\.bin\appium.cmd"
 & $Appium driver uninstall uiautomator2 2>$null | Out-Null
 & $Appium driver install "uiautomator2@$UiaVersion"

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Developer documentation and comments
+
+- Added module/helper contract docstrings and test-module scope notes without changing executable Python statements.
+- Added AGENTS.md, CLAUDE.md, developer/configuration/artifact guides, and a complete reference for the shipped configuration fields.
+- Updated README, architecture, quick start, market, discovery, scenario, and handoff documentation to distinguish intended guarantees from unresolved baseline defects.
+- Clarified example configuration/scenario notes and added informational manifest validation/documentation metadata; runtime settings, dependency ranges, CLI flags, and version remain unchanged.
+- Documented historical test errors, pending Claude review, and absence of device evidence. These explanatory updates are not functional fixes.
+
 ## v0.5.0 — Fail-closed hardening
 
 - Baseline crawler replay failures now force `PARTIAL` coverage.
