@@ -1,0 +1,24 @@
+{
+  "name": "OS Differential Regression Tester",
+  "version": "0.5.0",
+  "primaryMode": "market-run",
+  "modes": [
+    "market-run",
+    "auto-run",
+    "run"
+  ],
+  "physicalDeviceMarketMode": true,
+  "marketModeInstallsApp": false,
+  "strictSameAppVersionAndBuild": true,
+  "androidMarketProvenance": "package-manager installer metadata",
+  "iosMarketProvenance": "operator App Store attestation plus machine-verified bundle/version/build",
+  "automaticDiscovery": true,
+  "coverageSemantics": "reachable UI states under current policy, credentials/test data and limits",
+  "hardeningRelease": true,
+  "coverageFailClosed": true,
+  "singleRunLock": true,
+  "marketEnvironmentPreflight": true,
+  "androidMarketResetStrategy": "android_clear_data",
+  "iosMarketResetSemantics": "PARTIAL unless deterministic reset command configured",
+  "privateArtifactPermissions": true
+}

@@ -1,0 +1,5 @@
+{
+  "appium": "3.8.0",
+  "uiautomator2": "8.7.0",
+  "xcuitest": "12.14.0"
+}
