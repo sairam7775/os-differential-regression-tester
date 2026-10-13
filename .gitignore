@@ -1,0 +1,13 @@
+.venv/
+.node/
+.appium/
+runs/*
+!runs/.gitkeep
+apps/*
+!apps/.gitkeep
+*.emulator.log
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
