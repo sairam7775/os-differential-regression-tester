@@ -16,7 +16,7 @@ The candidate preserves those names so comparison can join corresponding paths.
 `report/` contains HTML, comparison/summary JSON, and screenshot/diff copies.
 Automatic modes add coverage.json; market mode adds device-provenance.json.
 Run timestamps/epochs use local time/time.time respectively, not a guaranteed UTC
-identifier. Durations currently use wall clock and configured settling sleeps.
+identifier. Durations use monotonic perf_counter and include configured action settling sleeps.
 
 ## Runtime dictionaries (in memory)
 
@@ -45,22 +45,25 @@ Automatic `recentActions` is the complete replay trace for the retained path.
 Different trace meanings between modes are intentional and must be preserved.
 
 The screenshot is optionally blacked out before storage. source.xml is captured
-native hierarchy after literal credential replacement; current replacement can
-make XML invalid. Path/trace/assertion/error metadata is not fully sanitized.
-Fingerprint and capture can represent different pre/post-input states in baseline.
+native hierarchy after decoded XML credential/identifier redaction. Nested path,
+trace, assertion, error, and summary strings are sanitized with known sensitive
+values. Baseline fingerprinting occurs after input filling. Malformed captures
+remain malformed so comparison rejects them.
 
 ## run-summary.json
 
 This is a list of scenario records, not one summary dictionary. Scenario execution
 records `scenario`, `status`, `error`, `actions`, `checkpointsCaptured`,
 `completedSteps`, and optional `traceback`. Checkpoint assertions are in state.json,
-not copied into the action list. Continue-on-failure can leave status passed.
+not copied into the action list. Continue-on-failure permits later steps but the
+scenario stays failed; false checkpoint assertions also fail the scenario.
 
 Automatic summaries contain one `auto_crawl` entry with platform/status/error,
 an empty actions list, and a `crawler` count/coverage object. Baseline status means
 at least one screen was discovered. Candidate status currently means the baseline
 had screens, even if replay paths failed; consult replay evidence/checkpoints.
-Malformed/missing/incomplete summary handling needs further fail-closed checks.
+Summaries must be nonempty lists of unique scenario records with valid statuses;
+malformed/missing/incomplete records invalidate comparison.
 
 ## Discovery graph and candidate replay
 
@@ -80,16 +83,24 @@ Malformed/missing/incomplete summary handling needs further fail-closed checks.
 | `coverageStatus`, `coverageNote` | COMPLETE_WITHIN_POLICY/PARTIAL plus scope statement |
 
 Actions contain `kind` (tap/scroll_down), `label`, and for taps `locators`,
-`ordinal`, `bounds`. Bounds store x/y/width/height. Locator candidates contain
-strategy/value. These records are replay hints, not verified safe-control identities.
+`ordinal`, `bounds`, `identity`. Bounds store x/y/width/height. Each locator stores
+strategy/value/ordinal over all native matches before filtering. identity contains
+stable own attributes and descendant captions. Replay verifies fresh source and
+live safety; legacy records without identity fail rather than using coordinates.
+Actions also contain requiredInputs: stable locator/ordinal IDs of inputs filled
+during baseline discovery. Credentials are not stored in this prerequisite list.
+Regenerate older graphs to obtain explicit input prerequisites.
+Input results include inputId; blockers include requiredForReplay for secure/secret
+refusals. Trace missingRequiredInputs identifies unmet baseline prerequisites.
+Unruled plain inputs stay empty and recorded without stopping unrelated actions.
 Input results store label/source or label/reason, not intended input values, but
-labels and errors can still reveal sensitive content.
+known sensitive values in labels/errors are sanitized before persistence.
 
 Trace entries contain `index`, `action`, `status`, `durationSeconds`, `inputsFilled`,
 `blockedInputs`, and an error when failed. The trace can be incomplete on failure.
 
 `auto-crawl-replay.json` contains platform/mode, `baselineScreens`,
-`reproducedScreens`, `failedPaths`, and `deterministicReset`. Failed paths store
+`reproducedScreens`, `failedPaths`, `blockedInputs`, and `deterministicReset`. Failed paths store
 checkpoint/error/path/trace. Reproduced counts captures rather than matched screens.
 
 ## Coverage and provenance
@@ -97,15 +108,17 @@ checkpoint/error/path/trace. Reproduced counts captures rather than matched scre
 coverage.json maps platform to automatic counts: discoveredBaselineScreens,
 candidateScreensReproduced, candidatePathFailures, baselineReplayFailures,
 blockedUnsafeActions, blockedInputs, actionsTruncated, depthFrontierReached,
-limitReached, coverageStatus, resetIsolationStatus, coverageNote. It currently
-derives reset/coverage status from baseline only. Intermediate replay blockers
-and candidate reset/input evidence remain incomplete. Blocked-action count also
+limitReached, coverageStatus, resetIsolationStatus, coverageNote. Additional
+fields baselineResetIsolationStatus, candidateResetIsolationStatus, and
+candidateBlockedInputs expose both targets. Resets aggregate true/false/null as
+DETERMINISTIC/NON_DETERMINISTIC/UNKNOWN. Candidate input blockers and every failed
+or missing path make coverage PARTIAL, as does branched non-deterministic reset. Blocked-action count also
 includes non-keyword blockers such as truncation/parse failures.
 
 device-provenance.json contains mode=`real-device-market-build`,
 toolInstalledApp=false, baseline/candidate device facts, and validation.
 Facts include platform, physicalDevice, manufacturer/model/modelVerified/name,
-OS release/API/patch/fingerprint, environment/screen size, app ID/version/build,
+OS release/API/patch/fingerprint/buildId/buildIncremental, environment/screen size, app ID/version/build,
 launch activity (Android), installer/allowed installers, origin verification/method,
 and toolInstalledApp. The primary deviceId is replaced by deviceIdMasked and
 deviceIdSha256; marketOriginRaw is removed. Other metadata is not a complete
@@ -113,7 +126,11 @@ privacy boundary.
 
 Validation contains valid/errors/warnings, sameHardwareModel,
 sameAppVersionAndBuild, environmentDifferences, baselineOsIdentity,
-candidateOsIdentity. OS tuples are persisted as JSON arrays; unknown components
+candidateOsIdentity and postRunIdentityVerified after the post-run gate. OS
+identity arrays contain release/API/patch/build ID/incremental, excluding Android
+hardware fingerprint portions. osDifferenceFields and osDifferenceEvidence show
+which fields qualify: release/API/patch for differing or unverified models, with
+build ID/incremental added only for verified matching hardware. Unknown components
 are empty strings. Missingness must not be interpreted as a verified OS difference.
 
 ## Comparison, scoring, and final summary
@@ -126,7 +143,9 @@ Compared pairs add hierarchyValid and relative baseline/candidate/diff image pat
 
 visual contains changedPixelRatio, meanDifference, dimensionChanged,
 baselineSize, candidateSize. Hierarchy differences use multiset signatures;
-default text/value omissions are documented in the assessment. Behavior includes
+default signatures include Android text and iOS value. Freshness age/clock/date
+values use the narrow default normalization policy; meaningful general numbers
+and dates remain compared. Raw sanitized XML is retained. Behavior includes
 assertion_regression, action_failure, duration_regression, and evidence errors.
 
 Score is the maximum matching risk, not a sum. Critical >=90, High >=70,
@@ -137,11 +156,11 @@ not validated statistical confidence.
 summary.json contains overallStatus, checkpoints, highRisk, review, invalid,
 checkpointInvalid, coverageInvalid, provenanceInvalid, report. `invalid` sums
 invalid rows and aggregate flags; it is not a count of unique root causes.
-`checkpoints` currently counts all non-synthetic rows, including INVALID ones.
+`checkpoints` counts valid non-synthetic rows and excludes INVALID evidence.
 highRisk excludes INVALID rows. Overall precedence is INVALID > FAIL > REVIEW > PASS.
-An empty result list without supplied invalid metadata can currently yield PASS;
-do not invoke reporting as a substitute for evidence validation.
+An empty results list produces a synthetic INVALID row. Assertion results must
+be boolean; action timings must be numeric, finite, and nonnegative.
 
 CLI exits use invalid/highRisk counts (0/2/3), exceptions use 1, cancellation 130.
-Auto-run additionally checks partial coverage. A report or exit zero alone does
-not repair the known evidence gaps or prove actual physical-device validation.
+Auto-run additionally checks partial coverage. A report or exit zero alone does not
+prove actual physical-device validation or remove hardware/content confounders.

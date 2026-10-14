@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased - Claude re-review follow-up (2026-10-14)
+
+- Allowed navigation past unruled plain input fields while retaining blockers and partial coverage; required baseline-filled or secure/secret inputs still stop replay when unmet.
+- Added stable requiredInputs/inputId metadata without credential values and tracked intermediate blockers after successful candidate navigation.
+- Restricted build ID/incremental OS-difference evidence to verified matching hardware; differing/unknown models require release/API/security-patch difference.
+- Allowed generic order/status navigation while retaining prohibited imperatives and conservative hardware/state-mutation boundaries, with explicit label outcome fixtures.
+- Added narrow hierarchy freshness age/clock/date normalization; counts, prices, versions, ordinary dates, missing controls, and failed statuses remain compared. Explicit empty patterns disable defaults.
+- Added 22 regressions and updated contracts/review mapping. CI: 126 methods per job, 125 passed and one platform skip across Windows/Linux Python 3.11/3.14. No devices or live Appium sessions tested.
+
+## Unreleased - review stabilization (2026-10-14)
+
+- Verified native control identity/per-locator ordinals/descendant safety before automatic taps; removed uncertain coordinate/gesture retries.
+- Added mandatory prohibited-action forms, narrow permission-only system traversal, and secure-field requirements for secrets.
+- Replaced Windows destructive PID polling with safe process queries and kernel-owned locks released on success/error/cancellation.
+- Preserved valid XML during redaction; sanitized known values in nested metadata, traces, summaries, errors, and retained logs.
+- Rejected malformed/missing/empty evidence, failed baseline assertions/actions, missing candidate actions, invalid images/hierarchies, and bad timing values.
+- Combined both-device reset/input evidence and made every failed/missing candidate branch partial; retained reset evidence after action errors.
+- Required positive common OS difference excluding hardware fingerprint portions, verified iOS physical enumeration, and added post-run app/OS/target identity checks.
+- Hardened Appium readiness/base-path/spawn/timeout cleanup, private emulator logs, PowerShell Python setup failures, shared ADB lookup, and Windows command launcher resolution.
+- Included custom input rules, expanded scenario values, and virtual target IDs in retained server-log sanitization.
+- Removed global SDK stubs and added Windows/Linux Python 3.11/3.14 CI with independent module and CLI argument checks. See docs/REVIEW_FIXES.md for exact results and compatibility changes.
+- Updated comments, configuration notes, developer handoff, and privacy/coverage documentation. Version remains 0.5.0; no real-device validation is claimed.
+
 ## Unreleased — Developer documentation and comments
 
 - Added module/helper contract docstrings and test-module scope notes without changing executable Python statements.

@@ -13,11 +13,14 @@ $npmVersion = (npm --version).Trim()
 if ([int]($npmVersion.Split('.')[0]) -lt 10) { throw "Unsupported npm $npmVersion. Need npm >=10." }
 
 Write-Host "== Python environment =="
-# Known baseline gap: native Python exit codes below are not explicitly checked.
-# A successful final message is not proof that every dependency installation succeeded.
+# Fail immediately on native Python errors; PowerShell ErrorActionPreference alone
+# does not reliably turn a nonzero native exit code into a terminating error.
 python -m venv .venv
+if ($LASTEXITCODE -ne 0) { throw "Python virtual environment creation failed." }
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
 & .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "Python dependency installation failed." }
 
 $versions = Get-Content .\config\tool-versions.json | ConvertFrom-Json
 $AppiumVersion = $versions.appium

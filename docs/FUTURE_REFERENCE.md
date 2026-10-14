@@ -1,56 +1,46 @@
-# Future reference and developer handoff — v0.5.0
+# Future reference and developer handoff - v0.5.0
 
 ## Objective and current state
 
-Detect OS-caused regressions in an unchanged Android/iOS production build, including
-INSTAX companion apps, without rebuilding or replacing the app. The supplied ZIP
-is imported, the baseline reviewed, and unresolved defects documented. No functional
-fixes or real-device validations are claimed by the comment/documentation update.
+Detect OS regressions in an unchanged Android/iOS production build, including
+INSTAX companion apps, without rebuilding or replacing the app. Claude completed
+the baseline review in PR #1. PR #2 implements stabilization fixes and targets main.
+Claude re-reviewed a85fb29 and raised four follow-ups. The current revision
+addresses them and needs exact-head review and physical-device acceptance.
 
-Start with [developer guide](DEVELOPER_GUIDE.md), [architecture](ARCHITECTURE.md),
-[configuration](CONFIGURATION.md), [artifacts](ARTIFACTS.md), and
-[baseline assessment](BASELINE_ASSESSMENT.md). README is the user-facing entry point;
-AGENTS.md and CLAUDE.md at the root orient coding agents.
+Start with [REVIEW_FIXES.md](REVIEW_FIXES.md), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md),
+[ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), and
+[ARTIFACTS.md](ARTIFACTS.md). [BASELINE_ASSESSMENT.md](BASELINE_ASSESSMENT.md)
+preserves the original results and findings; it is historical.
 
-## Evidence that must accompany the handoff
+## Handoff evidence
 
-- Exact source commit and tool/dependency versions, not only release label.
-- Actual test count, failures/errors/skips, and installation blockers.
-- Distinction between compilation, synthetic probes, mocked tests, live Appium,
-  emulator/simulator, and physical-device evidence.
-- Current review PR/head and whether Claude returned an actual review.
-- Private storage of credentials, device identifiers, screenshots, and hierarchy.
-
-The original suite attempt had 14 passes and three error entries out of 17 loaded
-entries; there are 38 test methods in source. Pillow was unavailable and an iOS
-mock import failed. Read the assessment for exact commands and limitations.
+Record exact commit and dependencies, actual test counts/errors/skips, independent
+review status, and separate evidence for synthetic tests, real SDK serialization,
+live Appium, virtual targets, and physical devices. Keep credentials, identifiers,
+screenshots, and hierarchy private. CI installs real dependencies and runs the full
+suite and independent modules on Windows/Linux Python 3.11/3.14. Local Pillow
+installation remains unavailable; no device execution is claimed.
 
 ## Priorities
 
-| Priority | Next work | Completion evidence |
+| Priority | Remaining work | Required evidence |
 | --- | --- | --- |
-| 1 | Safe live-control resolution, Windows locking/cleanup, syntax-preserving privacy, fail-closed artifacts/assertions/traces/reset/identity, CLI/session/setup handling | Focused regressions, complete suite, independent Claude review |
-| 2 | Android physical market-run; iOS physical validation when macOS/signing/two iPhones are available | Actual private device evidence tied to commit and unchanged app version/build |
-| 3 | Stable state identity, graph destinations/action outcomes, duplicate controls, scoped scrolling/back/tabs/dialogs/dynamic content | Controlled discovery/replay fixtures and honest frontier metrics |
-| 4 | Meaningful text/control changes, crash/hang/action evidence, visual noise, timing/severity | Known-good/bad fixtures with false-positive and false-negative checks |
-| 5 | Full environment/build details, side-by-side reports, explicit blocker/scope reporting, installation guidance | Reviewer can explain status and limitations from one report |
+| 1 | Review stabilization diff; broaden live session/setup acceptance where available | Exact-head independent review and genuine test results |
+| 2 | Android market-run on two phones; iOS when macOS/signing/two iPhones exist | Private evidence for unchanged app/build, positive OS difference, launch/reset/replay/capture/report |
+| 3 | Graph destinations/outcomes, duplicate edges, scoped scrolling/back/tabs/dialogs/dynamic content | Controlled fixtures and honest blocked/frontier metrics |
+| 4 | Semantic missing controls, crash/hang evidence, visual noise, repeated timing samples/severity | Known-good/bad fixtures with false-positive/negative analysis |
+| 5 | Full environment/build/blocker/scope details in reports and installation guidance | A reviewer can explain status and limitations from the report |
 
-The [assessment](BASELINE_ASSESSMENT.md) lists concrete defect triggers and the
-proposed logical commit sequence. Stabilize the baseline before major features.
+## Invariants and closing changes
 
-## Invariants
+Preserve market binaries and exact app version/build equality. Require positive
+known OS difference. Skipped, blocked, failed, or missing branches are incomplete.
+iOS relaunch does not reset data. Pairing/connections/printing/firmware/payment/
+destructive actions remain excluded from automatic safe mode. Preserve privacy
+and document justified compatibility changes.
 
-Preserve market-installed binaries and exact app version/build matching. Require
-positive OS/build/patch difference evidence. A skipped, blocked, or failed branch
-must never count as complete. Real iOS relaunch is not a reset. Printer/Bluetooth/
-firmware/purchase/destructive operations are excluded from automatic safe mode.
-Preserve privacy, report real validation honestly, and document justified
-compatibility changes. These requirements outrank optimistic feature metadata.
-
-## Before closing a fix
-
-Reproduce the issue, implement the smallest correct change, add a regression,
-run relevant checks, inspect error/cleanup/exit-code behavior, and update the
-corresponding known-issue comments and assessment status. Have Claude or another
-reviewer verify the exact diff. Do not merge or claim release validation based on
-an unanswered review request.
+For each fix, reproduce, implement a focused change, add a regression, run appropriate
+checks, inspect cleanup/exit codes, and update comments/data/docs. Review the exact
+current diff; a PR or passing synthetic tests alone do not establish physical safety.
+Do not mark original audit threads approved merely because fixes were pushed elsewhere.

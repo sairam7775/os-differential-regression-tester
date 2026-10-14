@@ -1,62 +1,60 @@
 # Automatic discovery and replay
 
-Both `auto-run` and `market-run` use `osdiff.crawler`. Policy and limits are
-documented in [configuration](CONFIGURATION.md); persisted graph/trace fields
-are documented in [artifacts](ARTIFACTS.md).
+`auto-run` and `market-run` share `osdiff.crawler`. [CONFIGURATION.md](CONFIGURATION.md)
+describes policy; [ARTIFACTS.md](ARTIFACTS.md) describes persisted evidence.
 
-## Actual algorithm
+## Algorithm and ownership
 
-1. Start a reusable target-specific Appium session.
-2. Pop a baseline action path from a breadth-first queue, initially the empty path.
-3. Terminate/reset/activate the target, then replay the path from launch.
-4. Before each action, attempt configured input filling; after it, check foreground.
-5. Capture hierarchy/context and fingerprint them; discard previously visited states.
-6. For a first-seen state, fill known inputs, discover/filter/sort/cap actions, and save a checkpoint.
-7. Queue child paths unless depth/other limits stop exploration.
-8. Persist graph/summary, then replay one retained path per baseline screen on candidate.
+1. Pop a baseline path from a breadth-first queue, initially empty.
+2. Create/reuse a target-specific session, terminate/reset/activate, and verify foreground.
+3. Before each replay action, verify foreground and fill permitted inputs. Unruled plain fields stay empty and recorded; refused secrets or missing baseline-filled prerequisites fail the path.
+4. Refresh source and native identity, validate live safety, execute once, and verify foreground afterward.
+5. Fill inputs at the destination, refresh hierarchy/context, then fingerprint the captured state.
+6. Skip duplicate fingerprints while retaining blockers. For a new state, discover/filter/cap actions and capture sanitized evidence.
+7. Queue child paths with stable IDs of baseline-filled inputs required for replay, unless depth/other limits stop exploration.
+8. Persist graph/summary, then replay one retained path per baseline screen on the candidate.
 
-One driver is reused per phase. Replay failure closes/recreates it. Session
-creation and capture failures can still escape outside replay-error handling.
+A session is reused per phase and closed/recreated after replay/state failure.
+Creation/reset/action/capture failures are recorded, and phase exit attempts quit.
+Reset status is tri-state: DETERMINISTIC, NON_DETERMINISTIC, UNKNOWN. An action
+failure does not erase evidence that its reset succeeded.
 
-## State and action identity
+## Safe control identity
 
-Fingerprinting uses configured hierarchy attributes, normalized dynamic patterns,
-and foreground context. It includes text/value by default. iOS context currently
-includes transient PID, so relaunch may create duplicate state identities.
-Fingerprinting also precedes input filling while capture can follow filling;
-these identities/artifacts need alignment during stabilization.
+Fingerprints use configured hierarchy attributes and normalized dynamic patterns,
+plus stable package/activity/bundle context. PID is excluded and input filling
+precedes fingerprinting. Overbroad dynamic patterns can still merge meaningful states.
 
-Tap actions contain label, ordered locator candidates, ordinal, and bounds.
-Ordinals are counted after safety filtering, while replay indexes unfiltered
-live locator matches. This can select Print for a retained Settings action when
-they share an ID. Fallback locators may have different match sets. Do not regard
-the action record or keyword check as proof of safe live resolution.
+Tap actions carry native identity, descendant captions, per-locator occurrence,
+and bounds. Occurrences count all matching source controls before filtering.
+Replay resolves the fresh hierarchy and validates live attributes, enabled state,
+and descendant safety before clicking once. Unverified legacy records and unsafe
+or changed controls fail. Bounds are informational; no coordinate fallback is used.
 
-The graph retains first-seen paths and queued `from` edges; it does not reliably
-record edge destinations or duplicate-state outcomes. Candidate `reproducedScreens`
-means captured checkpoints, not verified destination equivalence. Candidate
-fingerprints are stored as metadata and not directly enforced by comparison.
+Mandatory safe-mode rules cover prohibited hardware, payment, and destructive
+labels plus their common inflections. Generic order/status words are not
+mandatory; individual captions still block bare Order and purchase imperatives.
+Order history, Updates, Recently removed, and Last updated cards are navigable
+with shipped policy. Connected devices, Print preview, Printer status, and
+Remove from favourites remain conservatively blocked. Custom rules add to the floor.
+Only target-app controls and narrow Android/iOS permission dialogs may be traversed.
+Settings/installers/arbitrary external apps are rejected even if custom-listed.
+Secret rules require native secure-field evidence before typing; unknown or
+unrelated fields remain blocked. Keep `safeMode` enabled for market testing.
 
-## Policy and incomplete coverage
+## Coverage and remaining limitations
 
-Deny patterns win over allowed words. Blocked controls and unresolved inputs at
-discovered states, action truncation, baseline replay failure, depth/queue/screen/
-path limits, parse failure, and branched non-deterministic baseline reset force
-PARTIAL. Partial coverage is supplied to the report and yields INVALID/exit 3.
+Blocked controls/inputs, truncated actions, failed/missing paths, capture/parse
+failures, exhausted limits/frontiers, or branched unknown/non-deterministic reset
+on either target force PARTIAL. Reports then yield INVALID/exit 3 even when some
+captured checkpoints agree. COMPLETE_WITHIN_POLICY is confined to observed scope.
 
-Current intermediate replay input blockers and candidate input/reset evidence are
-not fully promoted into validity. Candidate missing checkpoints can score as
-regressions, but that does not repair incomplete baseline evidence. Positive
-coverage claims must address both sides and all explored/blocked/frontier actions.
+The graph keeps first-seen paths and queued source edges, without reliable resolved
+destinations or duplicate-edge outcomes. Candidate reproducedScreens counts captures,
+not semantic equivalence. Comparison examines matched artifact pairs separately.
 
-## Supported surface and limitations
-
-Native control heuristics cover taps, fields, tabs/cells/buttons by type, and a
-whole-window downward swipe when scrollable content is recognized. There is no
-automatic back action, container-specific upward/horizontal traversal, scroll-end
-proof, or full custom/WebView interaction support. Fixed settling sleeps and
-dynamic data can affect snapshots. Built-in system packages are always allowed;
-configuration adds packages rather than removing the built-ins.
-
-Printing, reprinting, Bluetooth pairing/connections, firmware, purchases, and
-destructive operations remain outside automatic safe-mode validation.
+Native heuristics support taps, fields, tabs/cells/buttons, and one whole-window
+downward swipe. There is no automatic back action, scoped up/horizontal traversal,
+scroll-end proof, or complete custom/WebView support. Dynamic data and fixed waits
+can affect snapshots. Localized/new permission surfaces fail closed and need
+focused fixtures before extending recognition. Physical validation remains pending.

@@ -65,13 +65,16 @@ than raising; false assertions currently do not stop checkpoint capture.
 Assertions run before screenshots/source. Each checkpoint persists actions since
 the previous checkpoint, window size, and capture epoch. Session startup/step
 exceptions return failed scenario details and attempt quit. Baseline assertion
-failures are not yet fully invalidated by the comparator; see the assessment.
+failures invalidate comparison, and false assertions fail the scenario even though
+capture continues. Continue-on-failure records failures rather than producing PASS.
 
 ## Credentials and OS-sensitive flows
 
 Use `${TEST_USER_EMAIL}`/`${TEST_USER_PASSWORD}` environment references in trusted
-scenario files; `.env` is not automatically loaded. Current assertions/errors and
-raw hierarchy redaction have privacy gaps, so do not use personal credentials.
+scenario files; `.env` is not automatically loaded. Known environment and expanded
+inline type_text values are sanitized from XML, assertions, errors, and summaries.
+Explicit scenarios do not enforce crawler secure-field policy; review them and
+use dedicated non-personal credentials.
 Set storage screenshot masks separately from comparison ignore masks.
 
 Cover camera/photo/file picker, permissions, keyboards, accessibility, background/

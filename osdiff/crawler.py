@@ -1,11 +1,9 @@
-"""Discover baseline UI states and replay their navigation paths on a candidate.
+"""Discover baseline UI states and replay retained paths on a candidate.
 
-Each queued path starts with the configured app-state reset. One Appium session
-is reused per phase and discarded after a replay error. Actions store locator
-candidates, ordinals, and bounds; these are not proof of safe live targeting.
-The imported baseline has unresolved locator/safety and reset-evidence gaps.
-See docs/AUTO_DISCOVERY.md and docs/BASELINE_ASSESSMENT.md before changing it.
-"""
+Each branch starts with its configured reset. Actions retain native identities
+and per-locator occurrences; live attributes and descendant safety are verified
+before interaction. Both targets contribute reset, input, and coverage evidence.
+See docs/AUTO_DISCOVERY.md for remaining graph and scrolling limitations."""
 
 from __future__ import annotations
 
@@ -15,33 +13,146 @@ import re
 import shutil
 import subprocess
 import time
+import unicodedata
 from collections import deque
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from appium import webdriver
-from appium.webdriver.common.appiumby import AppiumBy
 
-from osdiff.fsutil import mask_image_regions, private_dir, private_file, redact_values, write_json, write_text
+from osdiff.fsutil import mask_image_regions, private_dir, private_file, redact_values, redact_xml, write_json, write_text
 from osdiff.runner import _options
 
+# Only narrowly recognized permission dialogs can be traversed outside the app.
 DEFAULT_ANDROID_SYSTEM_PACKAGES = {
-    "com.android.permissioncontroller",
-    "com.google.android.permissioncontroller",
-    "com.android.packageinstaller",
-    "com.google.android.providers.media.module",
-    "com.android.providers.media.module",
-    "com.android.settings",
-    "com.google.android.documentsui",
-    "com.android.documentsui",
+    "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+}
+DEFAULT_IOS_SYSTEM_BUNDLES = {"com.apple.springboard"}
+FORBIDDEN_SYSTEM_SURFACES = {
+    "com.android.settings", "com.android.packageinstaller", "com.google.android.packageinstaller",
+    "com.apple.Preferences",
+}
+MANDATORY_DENY_PATTERNS = [
+    r"\b(?:un)?pair(?:ing|ed|s)?\b", r"\b(?:dis)?connect(?:ion|ions|ing|ed|s)?\b",
+    r"\bbluetooth\b", r"\b(?:re)?print(?:ing|ed|s|er|ers)?\b", r"firmware",
+    r"\b(?:pay(?:ment|ments|ing)?|purchas(?:e|es|ing)|buy|checkout|reorder)\b",
+    r"^\s*order\s*$", r"\b(?:place|confirm|submit)\s+(?:(?:an?|the)\s+)?order\b|\border\s+(?:now|again)\b",
+    r"\b(?:delet(?:e[ds]?|ing)|eras(?:e[ds]?|ing)|remov(?:e|es|ing)|updat(?:e|ing)|(?:un)?install(?:ed|ing|s)?|reset(?:s|ting)?|forget(?:s|ting)?)\b",
+    r"\bclear\s+(?:data|storage|cache)\b", r"\bforce\s+stop\b",
+    r"\b(?:send|submit)\b", r"\b(?:sign|log)\s*out\b",
+    r"\b(?:usb\s+debugging|airplane\s+mode)\b",
+]
+PERMISSION_LABELS = {
+    "allow", "don't allow", "dont allow", "deny", "not now", "cancel",
+    "allow once", "allow while using app", "allow while using the app",
+    "while using the app", "only this time", "ask app not to track",
 }
 
-DEFAULT_IOS_SYSTEM_BUNDLES = {
-    "com.apple.springboard",
-    "com.apple.Preferences",
-    "com.apple.mobileslideshow",
-    "com.apple.DocumentsApp",
-}
+def _safety_values(node):
+    """Keep individual captions available for imperative checks on unnamed containers."""
+    return [str(value) for child in node.iter() for key, value in child.attrib.items()
+            if key in {"text", "content-desc", "name", "label", "resource-id", "class", "type"} and value]
+
+
+def _caption_danger_reason(values, cfg):
+    """Check each caption as well as joined metadata; allow rules never override denies."""
+    return next((reason for value in [*values, " ".join(values)]
+                 if (reason := _danger_reason(value, cfg))), None)
+
+
+def _safety_text(node):
+    """Include descendant captions in the identity of a clickable container."""
+    return " ".join(_safety_values(node))
+
+def _control_identity(node):
+    """Stable native attributes and descendant captions, excluding geometry and input values."""
+    return {"attributes": {k: v for k, v in node.attrib.items()
+                           if k in {"class", "type", "resource-id", "content-desc", "text", "name", "label", "password"}},
+            "captions": _safety_text(node)}
+
+def _locator_matches(node, locator):
+    attrs = node.attrib
+    value = locator["value"]
+    if locator["strategy"] == "id":
+        return attrs.get("resource-id") == value
+    if locator["strategy"] == "accessibility_id":
+        return attrs.get("content-desc") == value or attrs.get("name") == value
+    if locator["strategy"] == "class_name":
+        return attrs.get("class") == value or attrs.get("type") == value
+    # Generated XPath locators are equality predicates, not arbitrary caller XPath.
+    return any(value == f"//*[@{key}={_xpath_literal(attrs[key])}]"
+               for key in ("text", "label") if attrs.get(key))
+
+def _identified_control(node, nodes, platform):
+    locators = _locators(platform, node.attrib)
+    for locator in locators:
+        matches = [entry for entry in nodes if _locator_matches(entry, locator)]
+        locator["ordinal"] = matches.index(node)
+    return {"locators": locators, "ordinal": locators[0]["ordinal"] if locators else 0,
+            "identity": _control_identity(node)}
+
+def _permission_action(node, platform):
+    if platform == "android":
+        return bool(re.search(r":id/permission_(?:allow|deny)(?:_[a-z]+)*_button$", node.attrib.get("resource-id", "")))
+    return _label(platform, node.attrib).lower().replace("\u2019", "'") in PERMISSION_LABELS
+
+def _attribute(element, names):
+    for name in names:
+        try:
+            value = element.get_attribute(name)
+        except Exception:
+            continue
+        if value is not None:
+            return str(value)
+    return None
+
+def _verify_live_control(element, identity, platform, cfg):
+    """Check the selected live element's own attributes and descendant safety captions."""
+    aliases = {"resource-id": ("resourceId", "resource-id"), "class": ("className", "class"),
+               "content-desc": ("contentDescription", "content-desc")}
+    expected = identity["attributes"]
+    if (_attribute(element, ("enabled",)) or "").lower() != "true":
+        raise RuntimeError("Live control is not enabled")
+    for key, value in expected.items():
+        if _attribute(element, aliases.get(key, (key,))) != str(value):
+            raise RuntimeError("Live control identity changed before interaction")
+    try:
+        descendants = element.find_elements("xpath", ".//*")
+    except Exception as exc:
+        raise RuntimeError("Unable to verify descendant safety before interaction") from exc
+    captions = []
+    for child in [element, *descendants]:
+        for name in ("text", "contentDescription", "content-desc", "name", "label", "resourceId"):
+            value = _attribute(child, (name,))
+            if value:
+                captions.append(value)
+    if cfg.get("safeMode", True) and _caption_danger_reason(captions, cfg):
+        raise RuntimeError("Live control blocked by safety policy")
+
+def _current_control(driver, platform, action, cfg):
+    """Resolve recorded identity against a fresh hierarchy before querying live locators."""
+    if not action.get("identity"):
+        raise RuntimeError("Automatic action lacks a verified control identity")
+    context = cfg.get("_foregroundContext")
+    actions, _, _ = discover_actions(driver.page_source or "", platform, cfg, context=context)
+    matches = [entry for entry in actions if entry.get("identity") == action["identity"]
+               and entry.get("ordinal") == action.get("ordinal") and entry.get("kind") == action.get("kind")]
+    if len(matches) != 1:
+        raise RuntimeError("Recorded control is missing, ambiguous, or blocked")
+    element = _find_for_action(driver, matches[0])
+    if element is None:
+        raise RuntimeError("Expected control occurrence not found")
+    _verify_live_control(element, matches[0]["identity"], platform, cfg)
+    return element
+
+def _merge_reset(left, right):
+    if left is False or right is False:
+        return False
+    if left is None or right is None:
+        return None
+    return True
+
+def _reset_status(evidence):
+    return "UNKNOWN" if evidence is None else ("DETERMINISTIC" if evidence else "NON_DETERMINISTIC")
 
 
 def _truthy(value):
@@ -159,12 +270,12 @@ def _locators(platform, attrs):
 
 
 def _danger_reason(text, cfg):
-    """Return the first deny-pattern reason; allowKeywords never override a deny."""
-    text = str(text or "")
-    for deny in cfg.get("denyKeywords", []):
+    """Deny mandatory hardware/destructive actions plus operator-configured patterns."""
+    text = unicodedata.normalize("NFKC", str(text or ""))
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text).replace("_", " ").replace("-", " ")
+    for deny in [*MANDATORY_DENY_PATTERNS, *cfg.get("denyKeywords", [])]:
         if re.search(deny, text, re.I):
             return f"blocked_by_keyword:{deny}"
-    # allowKeywords are retained only as positive metadata; they never override denies.
     return None
 
 
@@ -203,80 +314,66 @@ def _normalize_for_fingerprint(source, cfg):
 
 
 def state_fingerprint(source, cfg, context=None):
-    """Hash normalized UI plus supplied foreground context into a 16-character state key.
+    """Hash normalized hierarchy and stable package/activity/bundle context.
     
-    Transient iOS pid is currently included by callers, so relaunches can generate
-    new keys for the same screen. This is a discovery identity, not a safety proof."""
+    Transient process IDs are excluded. This identifies discovery states rather than
+    proving that a candidate destination is semantically equivalent."""
     normalized = _normalize_for_fingerprint(source, cfg)
+    context = {k: v for k, v in (context or {}).items() if k in {"package", "activity", "bundleId"}}
     if context:
         normalized += "\n@context:" + "|".join(f"{k}={context[k]}" for k in sorted(context) if context[k])
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
-def discover_actions(source, platform, cfg):
-    """Return (safe candidate actions, blocked reasons, input fields) from hierarchy XML.
-    
-    Actions contain kind, label, locator candidates, ordinal, and bounds. Ordinals
-    currently count filtered controls, which can resolve to a different unsafe live
-    control. Read the baseline assessment before trusting automatic clicks."""
+def discover_actions(source, platform, cfg, context=None):
+    """Discover identified controls; count locator occurrences before any filtering."""
     root = _xml_root(source)
     if root is None:
         return [], [{"label": "(hierarchy)", "reason": "hierarchy_parse_failed"}], []
-
+    nodes = list(root.iter())
     actions, blocked, input_nodes = [], [], []
-    seen = {}
     has_scrollable = False
-    for node in root.iter():
+    system = bool(context and context.get("systemSurface"))
+    for node in nodes:
         attrs = node.attrib
         bounds = _bounds_android(attrs.get("bounds")) if platform == "android" else _bounds_ios(attrs)
-        if _is_input(platform, attrs):
-            input_nodes.append({
-                "label": _label(platform, attrs),
-                "locators": _locators(platform, attrs),
-                "bounds": bounds,
-                "secure": attrs.get("type") == "XCUIElementTypeSecureTextField" or "password" in _label(platform, attrs).lower(),
-            })
-        if _is_scrollable(platform, attrs):
+        if _is_input(platform, attrs) and not system:
+            input_nodes.append({"label": _label(platform, attrs), "bounds": bounds,
+                "secure": _truthy(attrs.get("password")) if platform == "android" else attrs.get("type") == "XCUIElementTypeSecureTextField",
+                **_identified_control(node, nodes, platform)})
+        if _is_scrollable(platform, attrs) and not system:
             has_scrollable = True
         if not _is_actionable(platform, attrs) or not bounds:
             continue
-
         label = _label(platform, attrs)
-        locators = _locators(platform, attrs)
-        if not locators and not label:
-            blocked.append({"label": "(unidentified control)", "reason": "no_stable_locator"})
+        if system and not _permission_action(node, platform):
             continue
-
-        reason = _danger_reason(label + " " + " ".join(l.get("value", "") for l in locators), cfg)
+        reason = _caption_danger_reason(_safety_values(node), cfg)
         if cfg.get("safeMode", True) and reason:
             blocked.append({"label": label or "(unnamed)", "reason": reason})
             continue
-
-        primary = locators[0] if locators else {"strategy": "coordinate", "value": ""}
-        dedupe_base = f"{primary.get('strategy')}|{primary.get('value')}"
-        ordinal = seen.get(dedupe_base, 0)
-        seen[dedupe_base] = ordinal + 1
-        actions.append({"kind": "tap", "label": label or "(unnamed)", "locators": locators, "ordinal": ordinal, "bounds": bounds})
-
+        identified = _identified_control(node, nodes, platform)
+        if not identified["locators"]:
+            blocked.append({"label": label or "(unidentified control)", "reason": "no_stable_locator"})
+            continue
+        actions.append({"kind": "tap", "label": label or "(unnamed)", "bounds": bounds, **identified})
     if has_scrollable and cfg.get("enableScrolling", True):
         actions.append({"kind": "scroll_down", "label": "Scroll down"})
-
-    actions.sort(key=lambda a: (
-        a.get("kind") == "scroll_down",
-        0 if any(l.get("strategy") in ("id", "accessibility_id") for l in a.get("locators", [])) else 1,
-        a.get("label", ""),
-    ))
-    max_actions = int(cfg.get("maxActionsPerScreen", 24))
-    if len(actions) > max_actions:
-        blocked.append({
-            "label": "(action limit)", "reason": "actions_truncated",
-            "totalActions": len(actions), "exploredActions": max_actions,
-        })
-    return actions[:max_actions], blocked, input_nodes
+    if system and not actions:
+        blocked.append({"label": "(system surface)", "reason": "no_recognized_permission_action"})
+    actions.sort(key=lambda a: (a["kind"] == "scroll_down",
+        0 if any(l["strategy"] in ("id", "accessibility_id") for l in a.get("locators", [])) else 1, a["label"]))
+    limit = int(cfg.get("maxActionsPerScreen", 24))
+    if limit <= 0:
+        raise ValueError("maxActionsPerScreen must be positive")
+    if len(actions) > limit:
+        blocked.append({"label": "(action limit)", "reason": "actions_truncated", "totalActions": len(actions), "exploredActions": limit})
+    return actions[:limit], blocked, input_nodes
 
 
 def _find_elements(driver, locator):
     """Query a locator and collapse exceptions to no matches; transport errors lose their cause."""
+    from appium.webdriver.common.appiumby import AppiumBy
     mapping = {
         "id": AppiumBy.ID, "accessibility_id": AppiumBy.ACCESSIBILITY_ID,
         "xpath": AppiumBy.XPATH, "class_name": AppiumBy.CLASS_NAME,
@@ -291,50 +388,28 @@ def _find_elements(driver, locator):
 
 
 def _find_for_action(driver, action):
-    """Try locator candidates using one stored ordinal across their full live match sets.
+    """Try locators using each locator's occurrence in its full native match set.
     
-    Missing occurrences return None. Filtered-vs-live ordinals and fallback match-set
-    differences remain a confirmed safe-mode targeting defect."""
-    ordinal = int(action.get("ordinal", 0))
+    Filtering never renumbers occurrences. A returned element still needs fresh
+    identity and safety validation before interaction."""
     for locator in action.get("locators", []):
+        ordinal = int(locator.get("ordinal", action.get("ordinal", 0)))
+        if ordinal < 0:
+            continue
         matches = _find_elements(driver, locator)
         if ordinal < len(matches):
             return matches[ordinal]
     return None
 
 
-def _tap(driver, platform, action):
-    """Try element click, native gesture, then coordinates only when no locators were recorded.
-    
-    The resolved element is not rechecked against safety policy here. Gesture
-    fallback can retry after a click exception; avoid interpreting this as idempotent."""
-    element = _find_for_action(driver, action)
-    if element is not None:
-        try:
-            element.click()
-            return
-        except Exception:
-            try:
-                if platform == "android":
-                    driver.execute_script("mobile: clickGesture", {"elementId": element.id})
-                else:
-                    driver.execute_script("mobile: tap", {"elementId": element.id, "x": 1, "y": 1})
-                return
-            except Exception:
-                pass
+def _tap(driver, platform, action, cfg=None):
+    """Click a freshly identified, safety-checked live control exactly once.
 
-    # Coordinate fallback is allowed only for controls that had no stable locator.
-    if action.get("locators"):
-        raise RuntimeError(f"Expected control occurrence not found: {action.get('label')}")
-    bounds = action.get("bounds") or {}
-    x = int(bounds.get("x", 0) + bounds.get("width", 0) / 2)
-    y = int(bounds.get("y", 0) + bounds.get("height", 0) / 2)
-    if x <= 0 or y <= 0:
-        raise RuntimeError(f"Unable to locate action: {action.get('label')}")
-    if platform == "android":
-        driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
-    else:
-        driver.execute_script("mobile: tap", {"x": x, "y": y})
+    No coordinate or gesture retry follows an uncertain click outcome in safe mode.
+    """
+    cfg = cfg or {}
+    element = _current_control(driver, platform, action, cfg)
+    element.click()
 
 
 def _scroll(driver, platform):
@@ -344,10 +419,10 @@ def _scroll(driver, platform):
     driver.swipe(x, int(size["height"] * 0.78), x, int(size["height"] * 0.25), 450)
 
 
-def execute_action(driver, platform, action, settle_seconds=0.5):
+def execute_action(driver, platform, action, settle_seconds=0.5, cfg=None):
     """Execute a tap/down-scroll and sleep for stabilization; foreground checking belongs to replay."""
     if action["kind"] == "tap":
-        _tap(driver, platform, action)
+        _tap(driver, platform, action, cfg)
     elif action["kind"] == "scroll_down":
         _scroll(driver, platform)
     else:
@@ -364,44 +439,61 @@ def _input_value(rule):
     return rule.get("value")
 
 
+def _input_id(field):
+    """Identify a replay prerequisite by a stable locator and its native occurrence."""
+    locators = field.get("locators", [])
+    locator = next((item for strategy in ("id", "accessibility_id", "class_name")
+                    for item in locators if item["strategy"] == strategy), None)
+    if locator is None:
+        return None
+    return {"strategy": locator["strategy"], "value": locator["value"],
+            "ordinal": locator.get("ordinal", field.get("ordinal", 0))}
+
+
 def fill_known_inputs(driver, platform, source, cfg):
-    """Fill recognized fields and return metadata plus blocked reasons without storing input values.
-    
-    Duplicate fields currently use ordinal zero; failed clearing is ignored. Inline
-    rule values also need complete redaction coverage before production use."""
+    """Fill rules only after native identity/security checks; block uncertain fields."""
     _, _, inputs = discover_actions(source, platform, cfg)
-    rules = cfg.get("autoInputRules", [])
     filled, blocked = [], []
     for field in inputs:
-        haystack = field.get("label", "")
-        rule = next((r for r in rules if re.search(r.get("pattern", "$^"), haystack, re.I)), None)
+        label = field["label"]
+        rule = next((r for r in cfg.get("autoInputRules", []) if re.search(r.get("pattern", "$^"), label, re.I)), None)
+        reason = None
+        secret = bool(field["secure"])
         if not rule:
-            blocked.append({"label": haystack or "(input)", "reason": "no_auto_input_rule"})
+            reason = "no_auto_input_rule"
+        else:
+            secret = bool(secret or rule.get("secret") or rule.get("secure") or re.search(r"password|passcode|pin|token|secret", rule.get("env", ""), re.I))
+            if secret and not field["secure"]:
+                reason = "secret_requires_secure_field"
+            value = _input_value(rule) if reason is None else None
+            if reason is None and value in (None, ""):
+                reason = f"missing_input_value:{rule.get('env', 'inline')}"
+        if reason:
+            blocked.append({"label": label or "(input)", "reason": reason, "inputId": _input_id(field), "requiredForReplay": secret})
             continue
-        value = _input_value(rule)
-        if value in (None, ""):
-            blocked.append({"label": haystack or "(input)", "reason": f"missing_input_value:{rule.get('env','inline')}"})
-            continue
-        element = _find_for_action(driver, {"locators": field.get("locators", []), "ordinal": 0})
+        element = _find_for_action(driver, field)
         if element is None:
-            blocked.append({"label": haystack or "(input)", "reason": "input_not_found"})
+            blocked.append({"label": label, "reason": "input_not_found", "inputId": _input_id(field), "requiredForReplay": secret})
             continue
         try:
-            try:
-                element.clear()
-            except Exception:
-                pass
+            _verify_live_control(element, field["identity"], platform, cfg)
+            live_secure = _truthy(_attribute(element, ("password",))) if platform == "android" else _attribute(element, ("type",)) == "XCUIElementTypeSecureTextField"
+            if secret and not live_secure:
+                raise RuntimeError("Secret requires a secure live field")
+            element.clear()
             element.send_keys(str(value))
-            filled.append({"label": haystack or "(input)", "source": rule.get("env", "inline")})
+            filled.append({"label": label, "source": rule.get("env", "inline"), "inputId": _input_id(field)})
         except Exception as exc:
-            blocked.append({"label": haystack or "(input)", "reason": f"input_failed:{type(exc).__name__}"})
+            blocked.append({"label": label, "reason": f"input_failed:{type(exc).__name__}", "inputId": _input_id(field), "requiredForReplay": secret})
     return filled, blocked
 
 
 def _sensitive_values(cfg):
     """Collect configured secrets and environment-backed input values for literal redaction."""
-    values = list(cfg.get("sensitiveValues", []))
+    values = list(cfg.get("sensitiveValues", [])) + list(cfg.get("sensitiveDeviceIds", []))
     for rule in cfg.get("autoInputRules", []):
+        if rule.get("value"):
+            values.append(str(rule["value"]))
         env_name = rule.get("env")
         if env_name and os.getenv(env_name):
             values.append(os.getenv(env_name))
@@ -409,18 +501,19 @@ def _sensitive_values(cfg):
 
 
 def _redact_source(source, cfg):
-    """Apply literal hierarchy redaction; the current replacement can make XML invalid."""
-    return redact_values(source, _sensitive_values(cfg))
+    """Redact decoded XML values and serialize without repairing malformed captures."""
+    return redact_xml(source, _sensitive_values(cfg))
 
 
 def _save_checkpoint(driver, platform, checkpoint, state_id, path_actions, out_root, cfg, metadata=None, recent_actions=None):
-    """Persist a screenshot, source.xml, and state.json under auto_crawl/checkpoint.
+    """Capture a verified screenshot and sanitized hierarchy/state evidence.
     
-    Screenshot masks are storage privacy masks. Source redaction currently breaks XML
-    attributes; path/trace/metadata fields require additional secret sanitization."""
+    Storage masks run before report copies. A failed or missing screenshot raises;
+    known input values and target identifiers are removed from XML and JSON strings."""
     folder = private_dir(Path(out_root) / "auto_crawl" / checkpoint)
     screenshot = folder / "screen.png"
-    driver.save_screenshot(str(screenshot))
+    if driver.save_screenshot(str(screenshot)) is False or not screenshot.is_file():
+        raise RuntimeError("Screenshot capture failed")
     mask_image_regions(screenshot, cfg.get("sensitiveRegions", {}).get(platform, []))
     private_file(screenshot)
     source = driver.page_source or ""
@@ -432,12 +525,13 @@ def _save_checkpoint(driver, platform, checkpoint, state_id, path_actions, out_r
         "windowSize": driver.get_window_size(), "capturedEpoch": time.time(),
         "metadata": metadata or {},
     }
-    write_json(folder / "state.json", state)
+    write_json(folder / "state.json", state, sensitive_values=_sensitive_values(cfg))
     return source
 
 
 def _new_driver(server_url, runtime, platform):
     """Create a target-specific Appium session using runner's shared capability construction."""
+    from appium import webdriver
     return webdriver.Remote(server_url, options=_options(runtime, platform))
 
 
@@ -463,28 +557,26 @@ def _foreground_context(driver, platform):
 
 
 def _assert_allowed_foreground(driver, platform, runtime, cfg, *, after_activation=False):
-    """Require a known target app or built-in/configured system surface after reset/action.
-    
-    Configured packages extend built-in allowances. after_activation currently does
-    not tighten the policy; an allowed system surface may satisfy this check."""
+    """Allow the target or a positively recognized transient permission dialog only."""
     context = _foreground_context(driver, platform)
-    if platform == "android":
-        expected = runtime.get("appPackage")
-        current = context.get("package")
-        allowed = set(DEFAULT_ANDROID_SYSTEM_PACKAGES)
-        allowed.update(cfg.get("allowedSystemPackages", {}).get("android", []))
-    else:
-        expected = runtime.get("bundleId")
-        current = context.get("bundleId")
-        allowed = set(DEFAULT_IOS_SYSTEM_BUNDLES)
-        allowed.update(cfg.get("allowedSystemPackages", {}).get("ios", []))
+    expected = runtime.get("appPackage") if platform == "android" else runtime.get("bundleId")
+    current = context.get("package") if platform == "android" else context.get("bundleId")
     if not current:
         raise RuntimeError("Unable to determine the foreground application")
     if current == expected:
         return context
-    if current in allowed:
-        return context
-    raise RuntimeError(f"Navigation left target app: active={current!r}, expected={expected!r}")
+    allowed = DEFAULT_ANDROID_SYSTEM_PACKAGES if platform == "android" else DEFAULT_IOS_SYSTEM_BUNDLES
+    if current in FORBIDDEN_SYSTEM_SURFACES or current not in allowed:
+        raise RuntimeError("Navigation left the target app; external/system traversal blocked")
+    root = _xml_root(driver.page_source or "")
+    if root is None:
+        raise RuntimeError("Unable to verify permission dialog hierarchy")
+    if platform == "ios" and not any(n.attrib.get("type") == "XCUIElementTypeAlert" for n in root.iter()):
+        raise RuntimeError("SpringBoard is not a verified permission alert")
+    if not any(_permission_action(node, platform) for node in root.iter()):
+        raise RuntimeError("System surface has no recognized permission control")
+    context["systemSurface"] = True
+    return context
 
 
 def _run_reset_command(command, runtime, timeout):
@@ -543,7 +635,7 @@ def _prepare_path(driver, runtime, platform, cfg):
             raise RuntimeError(f"Unable to clear target app data: {(proc.stderr or proc.stdout).strip()}")
         deterministic = True
     elif strategy == "ios_simulator_reinstall":
-        if platform != "ios" or not runtime.get("appPath"):
+        if platform != "ios" or runtime.get("preinstalled") or not runtime.get("appPath"):
             raise RuntimeError("ios_simulator_reinstall requires iOS and appPath")
         xcrun = shutil.which("xcrun")
         if not xcrun:
@@ -577,45 +669,47 @@ def _prepare_path(driver, runtime, platform, cfg):
 
 
 def replay_path(server_url, runtime, platform, path_actions, cfg, driver=None):
-    """Return (driver, action trace, error, deterministic reset) after replay from launch.
-    
-    A caller-supplied driver remains caller-owned on failure. If this function
-    created the driver, it quits on replay failure and transfers ownership on success.
-    Session creation errors occur before the replay try block."""
+    """Replay with caller-owned sessions and preserve reset evidence after action failure.
+
+    Unruled plain fields remain empty/recorded; refused secrets and missing inputs
+    filled during baseline discovery fail prerequisites. Successful blockers still
+    contribute to partial coverage."""
     owns_driver = driver is None
-    if driver is None:
-        driver = _new_driver(server_url, runtime, platform)
-    trace = []
+    trace, deterministic = [], None
+    cfg = dict(cfg, sensitiveDeviceIds=[*cfg.get("sensitiveDeviceIds", []), runtime.get("udid")])
     try:
+        if driver is None:
+            driver = _new_driver(server_url, runtime, platform)
         deterministic = _prepare_path(driver, runtime, platform, cfg)
+        _assert_allowed_foreground(driver, platform, runtime, cfg)
         settle = float(cfg.get("settleSeconds", 0.6))
         for index, action in enumerate(path_actions):
-            source = driver.page_source or ""
-            filled, blocked_inputs = fill_known_inputs(driver, platform, source, cfg)
-            started = time.time()
-            rec = {
-                "index": index, "action": action, "status": "running",
-                "durationSeconds": 0.0, "inputsFilled": filled, "blockedInputs": blocked_inputs,
-            }
+            context = _assert_allowed_foreground(driver, platform, runtime, cfg)
+            filled, blocked = ([], []) if context.get("systemSurface") else fill_known_inputs(driver, platform, driver.page_source or "", cfg)
+            rec = {"index": index, "action": action, "status": "running", "durationSeconds": 0.0,
+                   "inputsFilled": filled, "blockedInputs": blocked}
+            start = time.perf_counter()
             try:
-                execute_action(driver, platform, action, settle)
+                filled_ids = [item["inputId"] for item in filled if item.get("inputId")]
+                missing = [item for item in action.get("requiredInputs", []) if item not in filled_ids]
+                rec["missingRequiredInputs"] = missing
+                # Optional unruled fields remain empty and recorded; they do not stop navigation.
+                if missing or any(item.get("requiredForReplay") for item in blocked):
+                    raise RuntimeError("Replay input prerequisites are incomplete")
+                execute_action(driver, platform, action, settle, dict(cfg, _foregroundContext=context))
                 _assert_allowed_foreground(driver, platform, runtime, cfg)
                 rec["status"] = "passed"
             except Exception as exc:
-                rec["status"] = "failed"
-                rec["error"] = f"{type(exc).__name__}: {exc}"
+                rec.update(status="failed", error=redact_values(f"{type(exc).__name__}: {exc}", _sensitive_values(cfg)))
                 raise
             finally:
-                rec["durationSeconds"] = round(time.time() - started, 3)
+                rec["durationSeconds"] = round(time.perf_counter() - start, 3)
                 trace.append(rec)
         return driver, trace, None, deterministic
     except Exception as exc:
         if owns_driver:
-            try:
-                driver.quit()
-            except Exception:
-                pass
-        return None, trace, f"{type(exc).__name__}: {exc}", False
+            _close_driver(driver)
+        return None, trace, redact_values(f"{type(exc).__name__}: {exc}", _sensitive_values(cfg)), deterministic
 
 
 def _close_driver(driver):
@@ -628,11 +722,11 @@ def _close_driver(driver):
 
 
 def crawl_baseline(server_url, runtime, platform, out_root, cfg):
-    """Breadth-first traversal of reset-to-launch action paths with checkpoint/graph persistence.
+    """Explore reset-based BFS paths and retain one checkpoint per normalized state.
     
-    First-seen fingerprints keep one representative path. Blocked/failed/truncated
-    branches and exhausted limits force PARTIAL; intermediate input and stable-state
-    checks still have gaps. Edges currently lack resolved destination state IDs."""
+    Creation/replay/capture failures are recorded as incomplete coverage. The graph
+    still stores queued source edges without reliable resolved destination IDs."""
+    cfg = dict(cfg, sensitiveDeviceIds=[*cfg.get("sensitiveDeviceIds", []), runtime.get("udid")])
     max_screens = int(cfg.get("maxScreens", 120))
     max_depth = int(cfg.get("maxDepth", 12))
     max_total_paths = int(cfg.get("maxTotalPaths", 800))
@@ -654,59 +748,74 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
         while queue and len(visited) < max_screens and attempted_paths < max_total_paths:
             path_actions = queue.popleft()
             attempted_paths += 1
-            if driver is None:
-                driver = _new_driver(server_url, runtime, platform)
             used_driver, trace, replay_error, deterministic = replay_path(
                 server_url, runtime, platform, path_actions, cfg, driver=driver
             )
-            graph["deterministicReset"] = graph["deterministicReset"] and deterministic
+            graph["deterministicReset"] = _merge_reset(graph["deterministicReset"], deterministic)
+            graph["blockedInputs"].extend({"pathIndex": rec["index"], **item}
+                for rec in trace for item in rec.get("blockedInputs", []))
             if used_driver is None:
                 graph["replayFailures"].append({"path": path_actions, "error": replay_error, "trace": trace})
                 _close_driver(driver)
                 driver = None
                 continue
             driver = used_driver
-            time.sleep(settle)
-            source = driver.page_source or ""
-            context = _foreground_context(driver, platform)
-            state_id = state_fingerprint(source, cfg, context)
-            if state_id in visited:
-                continue
-
-            checkpoint = f"screen_{len(visited)+1:04d}_{state_id[:8]}"
-            visited[state_id] = checkpoint
-            filled, blocked_inputs = fill_known_inputs(driver, platform, source, cfg)
-            if filled:
-                time.sleep(float(cfg.get("afterInputSettleSeconds", 0.3)))
+            state_id = None
+            try:
+                time.sleep(settle)
                 source = driver.page_source or ""
-
-            actions, blocked, _ = discover_actions(source, platform, cfg)
-            graph["actionsTruncated"] += sum(1 for item in blocked if item.get("reason") == "actions_truncated")
-            _save_checkpoint(
-                driver, platform, checkpoint, state_id, path_actions, out_root, cfg,
-                metadata={
-                    "depth": len(path_actions), "actionsDiscovered": len(actions),
-                    "inputsFilled": filled, "blockedInputs": blocked_inputs,
-                    "foreground": context,
-                },
-                recent_actions=trace,
-            )
-            graph["screens"].append({
-                "checkpoint": checkpoint, "stateFingerprint": state_id, "depth": len(path_actions),
-                "path": path_actions, "actionsDiscovered": len(actions),
-                "actionLabels": [a.get("label") for a in actions],
-            })
-            graph["blockedActions"].extend({"checkpoint": checkpoint, **item} for item in blocked)
-            graph["blockedInputs"].extend({"checkpoint": checkpoint, **item} for item in blocked_inputs)
-
-            if len(path_actions) >= max_depth:
-                if actions:
-                    graph["depthFrontierReached"] = True
-                continue
-            for action in actions:
-                child_path = path_actions + [action]
-                queue.append(child_path)
-                graph["edges"].append({"from": checkpoint, "action": action, "depth": len(child_path)})
+                context = _assert_allowed_foreground(driver, platform, runtime, cfg)
+                filled, blocked_inputs = ([], []) if context.get("systemSurface") else fill_known_inputs(driver, platform, source, cfg)
+                if filled:
+                    time.sleep(float(cfg.get("afterInputSettleSeconds", 0.3)))
+                    source = driver.page_source or ""
+                    context = _assert_allowed_foreground(driver, platform, runtime, cfg)
+                state_id = state_fingerprint(source, cfg, context)
+                if state_id in visited:
+                    graph["blockedInputs"].extend({"checkpoint": visited[state_id], **item} for item in blocked_inputs)
+                    continue
+                checkpoint = f"screen_{len(visited)+1:04d}_{state_id[:8]}"
+                visited[state_id] = checkpoint
+                actions, blocked, _ = discover_actions(source, platform, cfg, context=context)
+                graph["actionsTruncated"] += sum(1 for item in blocked if item.get("reason") == "actions_truncated")
+                try:
+                    _save_checkpoint(
+                        driver, platform, checkpoint, state_id, path_actions, out_root, cfg,
+                        metadata={
+                            "depth": len(path_actions), "actionsDiscovered": len(actions),
+                            "inputsFilled": filled, "blockedInputs": blocked_inputs,
+                            "foreground": context,
+                        },
+                        recent_actions=trace,
+                    )
+                except Exception as exc:
+                    graph["replayFailures"].append({"path": path_actions, "error": redact_values(f"capture_failed:{type(exc).__name__}", _sensitive_values(cfg)), "trace": trace})
+                    visited.pop(state_id, None)
+                    continue
+                graph["screens"].append({
+                    "checkpoint": checkpoint, "stateFingerprint": state_id, "depth": len(path_actions),
+                    "path": path_actions, "actionsDiscovered": len(actions),
+                    "actionLabels": [a.get("label") for a in actions],
+                })
+                graph["blockedActions"].extend({"checkpoint": checkpoint, **item} for item in blocked)
+                graph["blockedInputs"].extend({"checkpoint": checkpoint, **item} for item in blocked_inputs)
+    
+                if len(path_actions) >= max_depth:
+                    if actions:
+                        graph["depthFrontierReached"] = True
+                    continue
+                for action in actions:
+                    required_inputs = [item["inputId"] for item in filled if item.get("inputId")]
+                    action = dict(action, requiredInputs=required_inputs)
+                    child_path = path_actions + [action]
+                    queue.append(child_path)
+                    graph["edges"].append({"from": checkpoint, "action": action, "depth": len(child_path)})
+            except Exception as exc:
+                graph["replayFailures"].append({"path": path_actions, "error": redact_values(f"capture_or_state_failed:{type(exc).__name__}", _sensitive_values(cfg)), "trace": trace})
+                if state_id is not None:
+                    visited.pop(state_id, None)
+                _close_driver(driver)
+                driver = None
     finally:
         _close_driver(driver)
 
@@ -722,7 +831,7 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
         (not graph["deterministicReset"] and attempted_paths > 1),
     ])
     graph["coverageStatus"] = "PARTIAL" if incomplete else "COMPLETE_WITHIN_POLICY"
-    graph["resetIsolationStatus"] = "DETERMINISTIC" if graph["deterministicReset"] else "NON_DETERMINISTIC"
+    graph["resetIsolationStatus"] = _reset_status(graph["deterministicReset"])
     graph["coverageNote"] = (
         "Coverage means all UI states reachable from launch under the current crawler policy, credentials/test data, "
         "reset strategy and configured limits. Replay failures, blocked/truncated actions, missing inputs, or a non-"
@@ -730,7 +839,7 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
     )
 
     out_root = private_dir(out_root)
-    write_json(out_root / "auto-crawl-graph.json", graph)
+    write_json(out_root / "auto-crawl-graph.json", graph, sensitive_values=_sensitive_values(cfg))
     summary = [{
         "scenario": "auto_crawl", "platform": platform,
         "status": "passed" if graph["discoveredScreens"] > 0 else "failed",
@@ -741,54 +850,67 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
             "baselineReplayFailures": graph["baselineReplayFailures"], "resetIsolationStatus": graph["resetIsolationStatus"],
         },
     }]
-    write_json(out_root / "run-summary.json", summary)
+    write_json(out_root / "run-summary.json", summary, sensitive_values=_sensitive_values(cfg))
     return graph
 
 
 def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_root, cfg):
-    """Replay baseline screen paths and capture candidate artifacts under baseline checkpoint names.
+    """Replay baseline paths and capture candidate artifacts under baseline names.
     
-    reproducedScreens counts captures, not confirmed equivalent destinations. Failed
-    paths are retained separately; the returned reset flag is not fully propagated
-    by coverage_summary in this baseline."""
+    Reproduced counts captures, not confirmed destination equivalence. Failures and
+    blocked inputs are retained; coverage combines reset evidence from both devices."""
+    cfg = dict(cfg, sensitiveDeviceIds=[*cfg.get("sensitiveDeviceIds", []), runtime.get("udid")])
     reproduced, failures = 0, []
+    blocked_all = []
     driver = None
     deterministic_all = True
     try:
         for screen in baseline_graph.get("screens", []):
             checkpoint = screen["checkpoint"]
             path_actions = screen.get("path", [])
-            if driver is None:
-                driver = _new_driver(server_url, runtime, platform)
             used_driver, trace, error, deterministic = replay_path(
                 server_url, runtime, platform, path_actions, cfg, driver=driver
             )
-            deterministic_all = deterministic_all and deterministic
+            deterministic_all = _merge_reset(deterministic_all, deterministic)
             if used_driver is None:
                 failures.append({"checkpoint": checkpoint, "error": error, "path": path_actions, "trace": trace})
                 _close_driver(driver)
                 driver = None
                 continue
             driver = used_driver
-            time.sleep(float(cfg.get("settleSeconds", 0.6)))
-            source = driver.page_source or ""
-            filled, blocked_inputs = fill_known_inputs(driver, platform, source, cfg)
-            if filled:
-                time.sleep(float(cfg.get("afterInputSettleSeconds", 0.3)))
+            state_id = None
+            try:
+                time.sleep(float(cfg.get("settleSeconds", 0.6)))
                 source = driver.page_source or ""
-            context = _foreground_context(driver, platform)
-            state_id = state_fingerprint(source, cfg, context)
-            _save_checkpoint(
-                driver, platform, checkpoint, state_id, path_actions, out_root, cfg,
-                metadata={
-                    "replayedFromBaseline": True,
-                    "baselineStateFingerprint": screen.get("stateFingerprint"),
-                    "inputsFilled": filled, "blockedInputs": blocked_inputs,
-                    "foreground": context,
-                },
-                recent_actions=trace,
-            )
-            reproduced += 1
+                context = _assert_allowed_foreground(driver, platform, runtime, cfg)
+                filled, blocked_inputs = ([], []) if context.get("systemSurface") else fill_known_inputs(driver, platform, source, cfg)
+                if filled:
+                    time.sleep(float(cfg.get("afterInputSettleSeconds", 0.3)))
+                    source = driver.page_source or ""
+                blocked_all.extend({"checkpoint": checkpoint, **item} for item in blocked_inputs)
+                context = _assert_allowed_foreground(driver, platform, runtime, cfg)
+                state_id = state_fingerprint(source, cfg, context)
+                try:
+                    _save_checkpoint(
+                        driver, platform, checkpoint, state_id, path_actions, out_root, cfg,
+                        metadata={
+                            "replayedFromBaseline": True,
+                            "baselineStateFingerprint": screen.get("stateFingerprint"),
+                            "inputsFilled": filled, "blockedInputs": blocked_inputs,
+                            "foreground": context,
+                        },
+                        recent_actions=trace,
+                    )
+                except Exception as exc:
+                    failures.append({"checkpoint": checkpoint, "path": path_actions, "error": f"capture_failed:{type(exc).__name__}", "trace": trace, "artifactInvalid": True})
+                    continue
+                blocked_all.extend({"checkpoint": checkpoint, "pathIndex": rec["index"], **item}
+                    for rec in trace for item in rec.get("blockedInputs", []))
+                reproduced += 1
+            except Exception as exc:
+                failures.append({"checkpoint": checkpoint, "path": path_actions, "error": f"capture_or_state_failed:{type(exc).__name__}", "trace": trace, "artifactInvalid": True})
+                _close_driver(driver)
+                driver = None
     finally:
         _close_driver(driver)
 
@@ -797,9 +919,10 @@ def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_ro
         "baselineScreens": len(baseline_graph.get("screens", [])),
         "reproducedScreens": reproduced, "failedPaths": failures,
         "deterministicReset": deterministic_all,
+        "blockedInputs": blocked_all,
     }
     out_root = private_dir(out_root)
-    write_json(out_root / "auto-crawl-replay.json", result)
+    write_json(out_root / "auto-crawl-replay.json", result, sensitive_values=_sensitive_values(cfg))
     summary = [{
         "scenario": "auto_crawl", "platform": platform,
         "status": "passed" if baseline_graph.get("screens") else "failed",
@@ -810,27 +933,34 @@ def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_ro
             "reproducedScreens": reproduced, "failedPaths": len(failures),
         },
     }]
-    write_json(out_root / "run-summary.json", summary)
+    write_json(out_root / "run-summary.json", summary, sensitive_values=_sensitive_values(cfg))
     return result
 
 
 def coverage_summary(baseline_graph, candidate_replay):
-    """Combine discovery/replay counts for reporting using baseline coverage and reset status.
-    
-    Candidate path failures are regression evidence. Candidate non-deterministic
-    resets and blocked inputs still need to affect validity during stabilization."""
+    """Both targets' reset/input/capture evidence determines validity, not just baseline count."""
+    reset = _merge_reset(baseline_graph.get("deterministicReset"), candidate_replay.get("deterministicReset"))
+    failures = candidate_replay.get("failedPaths", [])
+    inputs = [*candidate_replay.get("blockedInputs", []),
+              *(item for failure in failures for rec in failure.get("trace", []) for item in rec.get("blockedInputs", []))]
+    branched = max(baseline_graph.get("attemptedPaths", 0), len(baseline_graph.get("screens", [])),
+                   candidate_replay.get("baselineScreens", 0), candidate_replay.get("reproducedScreens", 0)+len(failures)) > 1
+    expected = max(baseline_graph.get("discoveredScreens", 0), len(baseline_graph.get("screens", [])),
+                   candidate_replay.get("baselineScreens", 0))
+    incomplete = (baseline_graph.get("coverageStatus") != "COMPLETE_WITHIN_POLICY" or inputs
+                  or failures or candidate_replay.get("reproducedScreens", 0) < expected
+                  or (branched and reset is not True))
     return {
-        "mode": "automatic",
-        "discoveredBaselineScreens": int(baseline_graph.get("discoveredScreens", 0)),
+        "mode": "automatic", "discoveredBaselineScreens": int(baseline_graph.get("discoveredScreens", 0)),
         "candidateScreensReproduced": int(candidate_replay.get("reproducedScreens", 0)),
-        "candidatePathFailures": len(candidate_replay.get("failedPaths", [])),
-        "baselineReplayFailures": len(baseline_graph.get("replayFailures", [])),
+        "candidatePathFailures": len(failures), "baselineReplayFailures": len(baseline_graph.get("replayFailures", [])),
         "blockedUnsafeActions": len(baseline_graph.get("blockedActions", [])),
-        "blockedInputs": len(baseline_graph.get("blockedInputs", [])),
-        "actionsTruncated": int(baseline_graph.get("actionsTruncated", 0)),
-        "coverageStatus": baseline_graph.get("coverageStatus", "PARTIAL"),
-        "resetIsolationStatus": baseline_graph.get("resetIsolationStatus", "UNKNOWN"),
+        "blockedInputs": len(baseline_graph.get("blockedInputs", [])) + len(inputs),
+        "candidateBlockedInputs": len(inputs), "actionsTruncated": int(baseline_graph.get("actionsTruncated", 0)),
+        "coverageStatus": "PARTIAL" if incomplete else "COMPLETE_WITHIN_POLICY",
+        "resetIsolationStatus": _reset_status(reset),
+        "baselineResetIsolationStatus": _reset_status(baseline_graph.get("deterministicReset")),
+        "candidateResetIsolationStatus": _reset_status(candidate_replay.get("deterministicReset")),
         "depthFrontierReached": bool(baseline_graph.get("depthFrontierReached")),
-        "limitReached": bool(baseline_graph.get("limitReached")),
-        "coverageNote": baseline_graph.get("coverageNote"),
+        "limitReached": bool(baseline_graph.get("limitReached")), "coverageNote": baseline_graph.get("coverageNote"),
     }

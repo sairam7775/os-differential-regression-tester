@@ -5,7 +5,8 @@
 Read README.md, docs/DEVELOPER_GUIDE.md, docs/ARCHITECTURE.md,
 docs/CONFIGURATION.md, docs/ARTIFACTS.md, docs/BASELINE_ASSESSMENT.md, and
 docs/FUTURE_REFERENCE.md. Inspect relevant modules/tests before editing them.
-This is v0.5.0 with known defects, not a validated real-device release.
+This is v0.5.0 with review stabilization fixes; real-device validation is pending.
+Read docs/REVIEW_FIXES.md for current status; the baseline assessment is historical.
 
 ## Preserve the business invariants
 
@@ -39,7 +40,7 @@ not JSON comments. TOOL_MANIFEST feature flags describe intent, not test proof.
 Use a working project `.venv` and record actual full-suite/error/skip results.
 Compilation, synthetic fixtures, mocked tests, live Appium, virtual devices, and
 physical-device evidence are separate. Do not claim a green suite when dependencies
-or test imports fail. Test modules currently have global mock/import-order coupling.
+or test imports fail. SDK modules remain real; use scoped mocks and run each test module independently.
 
 For documentation-only edits, verify executable Python ASTs and runtime configuration
 remain unchanged, parse JSON, and compile. Do not silently fix behavior in a comment

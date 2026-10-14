@@ -7,18 +7,21 @@ market-installed app on two physical devices; developers do not rebuild that app
 
 ## Current development status
 
-This is the imported hardened baseline, with unresolved safety and validity
-defects. [The baseline assessment](docs/BASELINE_ASSESSMENT.md) records actual
-results, confirmed reproductions, and the prioritized stabilization plan. No
-physical-device, emulator/simulator, or live Appium validation has been performed.
-The local Claude review request is tracked in [PR #1](https://github.com/sairam7775/os-differential-regression-tester/pull/1);
-a running CLI command is not evidence of a completed review.
+Claude completed the baseline review in [PR #1](https://github.com/sairam7775/os-differential-regression-tester/pull/1).
+The stabilization fixes are in [PR #2](https://github.com/sairam7775/os-differential-regression-tester/pull/2),
+targeting `main`. They address unsafe control targeting, prohibited action labels,
+system navigation, secret input, Windows locking, invalid evidence, both-device
+reset/coverage, and app/OS identity. [Review fixes](docs/REVIEW_FIXES.md) maps findings
+to implementation and regression tests; the [baseline assessment](docs/BASELINE_ASSESSMENT.md)
+preserves the original failing test results.
 
-The baseline test attempt produced 14 passing methods, one test-method error,
-and two discovery errors; 38 test methods exist in source. Pillow was unavailable,
-and the iOS metadata test's partial Appium mock caused an import error.
-Do not describe the full suite as passing. Documentation and comments explain
-current behavior; they do not repair the known issues.
+CI installs real dependencies and runs the full suite plus every test module
+independently on Windows/Linux with Python 3.11/3.14. See the review-fix record for
+exact commits, counts, and platform skips. Local Pillow installation remains blocked.
+No physical-device, emulator/simulator, or live Appium validation has been performed.
+Claude re-reviewed commit a85fb29 and confirmed most original fixes. The four
+follow-up findings are addressed in the updated PR; approval of that revision
+and physical-device acceptance remain pending. See the review-fix record.
 
 ## Choose a mode
 
@@ -58,16 +61,15 @@ On macOS/Linux:
 ./scripts/osdiff.sh list-real-devices
 ```
 
-Check dependency installation errors explicitly, particularly on Windows where
-the baseline setup script does not check every Python command's exit code.
-The CLI currently imports Pillow even for help/doctor; install Python dependencies
-before using those commands. See [quick start](docs/QUICKSTART.md) for preparation.
+Setup checks Python dependency installation exit codes on Windows. Help and
+prerequisite commands defer optional SDK/image imports; execution and full tests
+still require `requirements.txt`. See [quick start](docs/QUICKSTART.md) for preparation.
 
 ## Physical-device market comparison
 
 Install the exact same market version/build on both dedicated devices, disable
 automatic app updates, align comparable environment settings, and use test accounts.
-After reviewing the [known safety defects](docs/BASELINE_ASSESSMENT.md), a configured
+After reviewing the [safety and validation limits](docs/REVIEW_FIXES.md), a configured
 Android command has this form:
 
 ```bash
@@ -99,13 +101,17 @@ and must preserve the store binary. Simulator reinstall is a virtual-mode operat
 
 Baseline discovery records blockers, failures, truncation, and exhausted limits.
 `PARTIAL` automatic coverage makes the report `INVALID`. A branched baseline
-with relaunch-only reset is partial. Current candidate reset/input gaps are
-documented; `COMPLETE_WITHIN_POLICY` is not proof of complete app coverage.
+with relaunch-only reset is partial. Candidate reset, blocked inputs, and failed
+or missing paths also contribute to partial coverage. `COMPLETE_WITHIN_POLICY`
+describes the explored policy scope, not complete app coverage.
 
-Safe mode intends to block pairing, Bluetooth connections, printing/reprinting,
-firmware, purchases, and destructive actions. Deny patterns override allowed
-words, but a confirmed shared-locator defect can still target a blocked control.
-Keep safe mode enabled and fix live target resolution before hardware validation.
+Safe mode blocks pairing, Bluetooth connections, printing/reprinting, firmware,
+purchases, and destructive action labels, including descendant captions. Mandatory
+deny rules remain even if custom rules are empty. Every tap verifies the fresh
+native identity, per-locator occurrence, enabled state, and live descendant safety.
+Settings/installers and other external apps stop traversal; only narrowly recognized
+permission dialogs are allowed. Secret input requires a verified secure field.
+Keep safe mode enabled and validate controls on dedicated devices.
 Explicit scenarios do not apply crawler deny rules automatically. Never use
 automatic safe mode for printer or other hardware side effects.
 
@@ -121,8 +127,8 @@ automatic safe mode for printer or other hardware side effects.
 
 The intended compatibility sign-off also requires valid baseline evidence, exact
 app version/build, verified OS difference, complete explored scope, valid artifacts,
-and deterministic reset on both devices. Known baseline gaps mean exit zero alone
-is not sufficient evidence. Overall report precedence is INVALID, FAIL, REVIEW, PASS.
+and deterministic reset on both devices. Review partial scope, hardware/content
+confounders, and device acceptance evidence before signing off. Overall report precedence is INVALID, FAIL, REVIEW, PASS.
 
 ```text
 runs/<local-timestamp>-<token>[-mode]/
@@ -140,10 +146,11 @@ runs/<local-timestamp>-<token>[-mode]/
 
 Artifacts are local. POSIX permissions are applied best-effort; Windows ACLs are
 not configured. Screenshot masking is opt-in. Provenance masks/hashes primary
-device IDs, but errors and traces need further sanitization; current XML redaction
-can corrupt syntax. Use dedicated non-personal data and preserve artifact privacy.
+device IDs. Known secrets and target IDs are removed from captured XML, nested
+metadata, traces, errors, and summaries using syntax-preserving redaction. Use dedicated non-personal data and preserve artifact privacy.
 Retention is disabled by default; positive `retentionDays` deletes old run folders.
-The single-run lock also has known Windows and cleanup defects.
+A kernel lock prevents concurrent runs and releases ownership on normal exit,
+error, cancellation, or process death; its empty file remains intentionally.
 
 ## Developer reading order
 
@@ -151,7 +158,8 @@ The single-run lock also has known Windows and cleanup defects.
 2. [Architecture](docs/ARCHITECTURE.md): data flow and resource ownership.
 3. [Configuration](docs/CONFIGURATION.md): every default field and CLI precedence.
 4. [Artifacts](docs/ARTIFACTS.md): JSON/XML/image field meanings and result semantics.
-5. [Baseline assessment](docs/BASELINE_ASSESSMENT.md): issues requiring fixes.
+5. [Review fixes](docs/REVIEW_FIXES.md): implemented changes, validation, and remaining work.
+   [Baseline assessment](docs/BASELINE_ASSESSMENT.md) preserves the historical findings.
 6. [Future reference](docs/FUTURE_REFERENCE.md): priorities and next-review checklist.
 
 Agent instructions are in [AGENTS.md](AGENTS.md); Claude-specific orientation is in
