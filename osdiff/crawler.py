@@ -34,8 +34,9 @@ FORBIDDEN_SYSTEM_SURFACES = {
 MANDATORY_DENY_PATTERNS = [
     r"\b(?:un)?pair(?:ing|ed|s)?\b", r"\b(?:dis)?connect(?:ion|ions|ing|ed|s)?\b",
     r"\bbluetooth\b", r"\b(?:re)?print(?:ing|ed|s|er|ers)?\b", r"firmware",
-    r"\b(?:pay(?:ment|ments|ing)?|purchas(?:e|es|ing)|buy|checkout|reorder|order)\b",
-    r"\b(?:delet(?:e[ds]?|ing)|eras(?:e[ds]?|ing)|remov(?:e[ds]?|ing)|updat(?:e[ds]?|ing)|(?:un)?install(?:ed|ing|s)?|reset(?:s|ting)?|forget(?:s|ting)?)\b",
+    r"\b(?:pay(?:ment|ments|ing)?|purchas(?:e|es|ing)|buy|checkout|reorder)\b",
+    r"^\s*order\s*$", r"\b(?:place|confirm|submit)\s+(?:(?:an?|the)\s+)?order\b|\border\s+(?:now|again)\b",
+    r"\b(?:delet(?:e[ds]?|ing)|eras(?:e[ds]?|ing)|remov(?:e|es|ing)|updat(?:e|ing)|(?:un)?install(?:ed|ing|s)?|reset(?:s|ting)?|forget(?:s|ting)?)\b",
     r"\bclear\s+(?:data|storage|cache)\b", r"\bforce\s+stop\b",
     r"\b(?:send|submit)\b", r"\b(?:sign|log)\s*out\b",
     r"\b(?:usb\s+debugging|airplane\s+mode)\b",
@@ -46,10 +47,21 @@ PERMISSION_LABELS = {
     "while using the app", "only this time", "ask app not to track",
 }
 
+def _safety_values(node):
+    """Keep individual captions available for imperative checks on unnamed containers."""
+    return [str(value) for child in node.iter() for key, value in child.attrib.items()
+            if key in {"text", "content-desc", "name", "label", "resource-id", "class", "type"} and value]
+
+
+def _caption_danger_reason(values, cfg):
+    """Check each caption as well as joined metadata; allow rules never override denies."""
+    return next((reason for value in [*values, " ".join(values)]
+                 if (reason := _danger_reason(value, cfg))), None)
+
+
 def _safety_text(node):
     """Include descendant captions in the identity of a clickable container."""
-    return " ".join(str(value) for child in node.iter() for key, value in child.attrib.items()
-                    if key in {"text", "content-desc", "name", "label", "resource-id", "class", "type"} and value)
+    return " ".join(_safety_values(node))
 
 def _control_identity(node):
     """Stable native attributes and descendant captions, excluding geometry and input values."""
@@ -113,7 +125,7 @@ def _verify_live_control(element, identity, platform, cfg):
             value = _attribute(child, (name,))
             if value:
                 captions.append(value)
-    if cfg.get("safeMode", True) and _danger_reason(" ".join(captions), cfg):
+    if cfg.get("safeMode", True) and _caption_danger_reason(captions, cfg):
         raise RuntimeError("Live control blocked by safety policy")
 
 def _current_control(driver, platform, action, cfg):
@@ -336,7 +348,7 @@ def discover_actions(source, platform, cfg, context=None):
         label = _label(platform, attrs)
         if system and not _permission_action(node, platform):
             continue
-        reason = _danger_reason(_safety_text(node), cfg)
+        reason = _caption_danger_reason(_safety_values(node), cfg)
         if cfg.get("safeMode", True) and reason:
             blocked.append({"label": label or "(unnamed)", "reason": reason})
             continue
@@ -427,6 +439,17 @@ def _input_value(rule):
     return rule.get("value")
 
 
+def _input_id(field):
+    """Identify a replay prerequisite by a stable locator and its native occurrence."""
+    locators = field.get("locators", [])
+    locator = next((item for strategy in ("id", "accessibility_id", "class_name")
+                    for item in locators if item["strategy"] == strategy), None)
+    if locator is None:
+        return None
+    return {"strategy": locator["strategy"], "value": locator["value"],
+            "ordinal": locator.get("ordinal", field.get("ordinal", 0))}
+
+
 def fill_known_inputs(driver, platform, source, cfg):
     """Fill rules only after native identity/security checks; block uncertain fields."""
     _, _, inputs = discover_actions(source, platform, cfg)
@@ -435,21 +458,22 @@ def fill_known_inputs(driver, platform, source, cfg):
         label = field["label"]
         rule = next((r for r in cfg.get("autoInputRules", []) if re.search(r.get("pattern", "$^"), label, re.I)), None)
         reason = None
+        secret = bool(field["secure"])
         if not rule:
             reason = "no_auto_input_rule"
         else:
-            secret = bool(rule.get("secret") or rule.get("secure") or re.search(r"password|passcode|pin|token|secret", rule.get("env", ""), re.I))
+            secret = bool(secret or rule.get("secret") or rule.get("secure") or re.search(r"password|passcode|pin|token|secret", rule.get("env", ""), re.I))
             if secret and not field["secure"]:
                 reason = "secret_requires_secure_field"
             value = _input_value(rule) if reason is None else None
             if reason is None and value in (None, ""):
                 reason = f"missing_input_value:{rule.get('env', 'inline')}"
         if reason:
-            blocked.append({"label": label or "(input)", "reason": reason})
+            blocked.append({"label": label or "(input)", "reason": reason, "inputId": _input_id(field), "requiredForReplay": secret})
             continue
         element = _find_for_action(driver, field)
         if element is None:
-            blocked.append({"label": label, "reason": "input_not_found"})
+            blocked.append({"label": label, "reason": "input_not_found", "inputId": _input_id(field), "requiredForReplay": secret})
             continue
         try:
             _verify_live_control(element, field["identity"], platform, cfg)
@@ -458,9 +482,9 @@ def fill_known_inputs(driver, platform, source, cfg):
                 raise RuntimeError("Secret requires a secure live field")
             element.clear()
             element.send_keys(str(value))
-            filled.append({"label": label, "source": rule.get("env", "inline")})
+            filled.append({"label": label, "source": rule.get("env", "inline"), "inputId": _input_id(field)})
         except Exception as exc:
-            blocked.append({"label": label, "reason": f"input_failed:{type(exc).__name__}"})
+            blocked.append({"label": label, "reason": f"input_failed:{type(exc).__name__}", "inputId": _input_id(field), "requiredForReplay": secret})
     return filled, blocked
 
 
@@ -662,7 +686,11 @@ def replay_path(server_url, runtime, platform, path_actions, cfg, driver=None):
                    "inputsFilled": filled, "blockedInputs": blocked}
             start = time.perf_counter()
             try:
-                if blocked:
+                filled_ids = [item["inputId"] for item in filled if item.get("inputId")]
+                missing = [item for item in action.get("requiredInputs", []) if item not in filled_ids]
+                rec["missingRequiredInputs"] = missing
+                # Optional unruled fields remain empty and recorded; they do not stop navigation.
+                if missing or any(item.get("requiredForReplay") for item in blocked):
                     raise RuntimeError("Replay input prerequisites are incomplete")
                 execute_action(driver, platform, action, settle, dict(cfg, _foregroundContext=context))
                 _assert_allowed_foreground(driver, platform, runtime, cfg)
@@ -720,6 +748,8 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
                 server_url, runtime, platform, path_actions, cfg, driver=driver
             )
             graph["deterministicReset"] = _merge_reset(graph["deterministicReset"], deterministic)
+            graph["blockedInputs"].extend({"pathIndex": rec["index"], **item}
+                for rec in trace for item in rec.get("blockedInputs", []))
             if used_driver is None:
                 graph["replayFailures"].append({"path": path_actions, "error": replay_error, "trace": trace})
                 _close_driver(driver)
@@ -771,6 +801,8 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
                         graph["depthFrontierReached"] = True
                     continue
                 for action in actions:
+                    required_inputs = [item["inputId"] for item in filled if item.get("inputId")]
+                    action = dict(action, requiredInputs=required_inputs)
                     child_path = path_actions + [action]
                     queue.append(child_path)
                     graph["edges"].append({"from": checkpoint, "action": action, "depth": len(child_path)})
@@ -868,6 +900,8 @@ def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_ro
                 except Exception as exc:
                     failures.append({"checkpoint": checkpoint, "path": path_actions, "error": f"capture_failed:{type(exc).__name__}", "trace": trace, "artifactInvalid": True})
                     continue
+                blocked_all.extend({"checkpoint": checkpoint, "pathIndex": rec["index"], **item}
+                    for rec in trace for item in rec.get("blockedInputs", []))
                 reproduced += 1
             except Exception as exc:
                 failures.append({"checkpoint": checkpoint, "path": path_actions, "error": f"capture_or_state_failed:{type(exc).__name__}", "trace": trace, "artifactInvalid": True})

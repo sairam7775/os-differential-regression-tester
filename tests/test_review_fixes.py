@@ -243,7 +243,7 @@ class OsIdentityTests(unittest.TestCase):
         b,c=self.pair(); c["securityPatch"]="2026-10-01"
         self.assertTrue(market.validate_market_pair(b,c)["valid"])
     def test_build_id_difference_is_positive_os_evidence(self):
-        b,c=self.pair(); c["buildFingerprint"]="google/panther/panther:14/UP1B/124:user/release-keys"
+        b,c=self.pair(); c["model"]=b["model"]; c["buildFingerprint"]="google/oriole/oriole:14/UP1B/124:user/release-keys"
         self.assertTrue(market.validate_market_pair(b,c)["valid"])
     def test_missing_os_components_do_not_create_a_difference(self):
         b,c=self.pair()

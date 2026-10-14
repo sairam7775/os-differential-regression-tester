@@ -70,7 +70,9 @@
       "text",
       "value"
     ],
-    "hierarchyIgnoreValuePatterns": [],
+    "hierarchyIgnoreValuePatterns": [
+      "(?i)(?:(?<=last synced )|(?<=last updated )|(?<=last refreshed )|(?<=last checked ))(?:\\d+\\s*(?:seconds?|secs?|minutes?|mins?|hours?|days?|weeks?)\\s+ago|just now|yesterday|today|\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2}(?::\\d{2})?(?:Z|[+-]\\d{2}:\\d{2})?)?|\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\s*[AP]M)?)\\b"
+    ],
     "ignoreRegions": {
       "android": [
         {
@@ -109,7 +111,6 @@
       "\\bpurchase\\b",
       "\\bbuy\\b",
       "\\bpay\\b",
-      "\\border\\b",
       "\\bbook\\b",
       "\\bsend\\b",
       "\\bsubmit\\b",

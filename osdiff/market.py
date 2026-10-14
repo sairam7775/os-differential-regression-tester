@@ -368,7 +368,18 @@ def validate_market_pair(baseline, candidate, require_same_model=False, require_
     elif str(bbuild) != str(cbuild):
         errors.append("app_build_mismatch")
 
-    pairs = [(a, b) for a, b in zip(_os_identity(baseline), _os_identity(candidate)) if a and b]
+    def known_hardware(value):
+        text = str(value or "").strip().casefold()
+        return text if text not in {"", "unknown", "null", "none", "n/a", "iphone", "ipad", "ios device", "android", "phone"} else ""
+
+    manufacturers = [known_hardware(item.get("manufacturer")) for item in (baseline, candidate)]
+    models = [known_hardware(item.get("model")) for item in (baseline, candidate)]
+    models_verified = (all(manufacturers) and all(models)
+        and baseline.get("modelVerified", True) is True and candidate.get("modelVerified", True) is True)
+    same_model = bool(models_verified and manufacturers[0] == manufacturers[1] and models[0] == models[1])
+    os_fields = ["osVersion", "apiLevel", "securityPatch", "buildId", "buildIncremental"][:5 if same_model else 3]
+    identities = list(zip(_os_identity(baseline), _os_identity(candidate)))[:len(os_fields)]
+    pairs = [(a, b) for a, b in identities if a and b]
     if not pairs:
         errors.append("os_identity_unavailable")
     if not any(a != b for a, b in pairs):
@@ -378,11 +389,6 @@ def validate_market_pair(baseline, candidate, require_same_model=False, require_
     if not candidate.get("marketOriginVerified"):
         errors.append("candidate_market_origin_not_verified")
 
-    same_model = (
-        str(baseline.get("manufacturer", "")).lower() == str(candidate.get("manufacturer", "")).lower()
-        and str(baseline.get("model", "")).lower() == str(candidate.get("model", "")).lower()
-    )
-    models_verified = bool(baseline.get("modelVerified", True) and candidate.get("modelVerified", True))
     if not models_verified:
         if require_same_model:
             errors.append("hardware_model_unverified")
@@ -406,6 +412,9 @@ def validate_market_pair(baseline, candidate, require_same_model=False, require_
         "valid": not errors, "errors": errors, "warnings": warnings,
         "sameHardwareModel": same_model and models_verified,
         "sameAppVersionAndBuild": same_app,
+        "osDifferenceFields": os_fields,
+        "osDifferenceEvidence": [{"field": field, "baseline": a, "candidate": b}
+            for field, (a, b) in zip(os_fields, identities) if a and b and a != b],
         "environmentDifferences": environment_differences,
         "baselineOsIdentity": _os_identity(baseline),
         "candidateOsIdentity": _os_identity(candidate),

@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image
 from osdiff import crawler, devices, runner
-from osdiff.compare import compare_platform, write_report
+from osdiff.compare import compare_platform, write_report, hierarchy_result
 
 ROOT=Path(__file__).resolve().parents[1]
 CONFIG=json.loads((ROOT/'config/local-config.json').read_text())["comparison"]
@@ -88,6 +88,46 @@ class EvidenceTests(unittest.TestCase):
         self.assertGreater(result['hierarchyChangeRatio'],0)
     def test_empty_report_is_invalid(self):
         self.assertEqual(write_report(self.root/'empty',[])['overallStatus'],'INVALID')
+
+    def hierarchy_pair(self, left, right, cfg):
+        for role, text in (("baseline",left),("candidate",right)):
+            root=ET.Element('hierarchy')
+            ET.SubElement(root,'node',{'class':'TextView','resource-id':'status','text':text,'value':text})
+            (self.folders[role]/'source.xml').write_text(ET.tostring(root,encoding='unicode'),encoding='utf-8')
+        return hierarchy_result(self.folders['baseline']/'source.xml',self.folders['candidate']/'source.xml',cfg)
+
+    def test_freshness_age_clock_and_date_noise_is_normalized(self):
+        pairs=(("Last synced 2 min ago","Last synced 3 min ago"),
+               ("Last updated yesterday","Last updated 2 hours ago"),
+               ("Last refreshed 09:10","Last refreshed 09:11"),
+               ("Last checked 2026-10-13T09:10:12Z","Last checked 2026-10-14T09:10:14Z"))
+        for cfg in ({},CONFIG):
+            for left,right in pairs:
+                with self.subTest(left=left,cfg=bool(cfg)):
+                    result=self.hierarchy_pair(left,right,cfg)
+                    self.assertTrue(result['valid'])
+                    self.assertEqual(result['ratio'],0)
+
+    def test_default_normalization_preserves_meaningful_numbers_and_state(self):
+        pairs=(("3 photos","4 photos"),("Price $12","Price $13"),
+               ("Appointment 2026-10-13","Appointment 2026-10-14"),
+               ("Version 1.2","Version 1.3"),("Last synced 2 min ago","Last updated 2 min ago"),
+               ("Last synced 2 min ago","Sync failed"))
+        for left,right in pairs:
+            with self.subTest(left=left):
+                self.assertGreater(self.hierarchy_pair(left,right,CONFIG)['ratio'],0)
+
+    def test_normalization_never_hides_missing_controls(self):
+        self.hierarchy_pair("Last synced 2 min ago","Last synced 3 min ago",CONFIG)
+        source=self.folders['baseline']/'source.xml'; root=ET.fromstring(source.read_text(encoding='utf-8'))
+        ET.SubElement(root,'node',{'class':'Button','resource-id':'details','text':'Details'})
+        source.write_text(ET.tostring(root,encoding='unicode'),encoding='utf-8')
+        result=hierarchy_result(source,self.folders['candidate']/'source.xml',CONFIG)
+        self.assertGreater(result['ratio'],0)
+
+    def test_explicit_empty_patterns_disable_default_normalization(self):
+        result=self.hierarchy_pair("Last synced 2 min ago","Last synced 3 min ago",dict(CONFIG,hierarchyIgnoreValuePatterns=[]))
+        self.assertGreater(result['ratio'],0)
 
 
 class CaptureTests(unittest.TestCase):

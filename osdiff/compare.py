@@ -20,6 +20,16 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 from osdiff.fsutil import private_dir, private_file, write_json, write_text
 
 
+# Normalize age/clock/date values only in known freshness captions. Global numeric
+# replacement could hide count, price, version, or date-picker regressions.
+DEFAULT_HIERARCHY_IGNORE_VALUE_PATTERNS = [
+    r"(?i)(?:(?<=last synced )|(?<=last updated )|(?<=last refreshed )|(?<=last checked ))"
+    r"(?:\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|days?|weeks?)\s+ago|just now|yesterday|today|"
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?|"
+    r"\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)\b"
+]
+
+
 def _load(path, default=None):
     """Load evidence without treating malformed JSON as an empty successful capture."""
     return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -28,7 +38,7 @@ def _load(path, default=None):
 def _normalized_attr(value, cfg):
     """Replace configured dynamic-value patterns before hierarchy signature comparison."""
     value = str(value)
-    for pattern in cfg.get("hierarchyIgnoreValuePatterns", []):
+    for pattern in cfg.get("hierarchyIgnoreValuePatterns", DEFAULT_HIERARCHY_IGNORE_VALUE_PATTERNS):
         value = re.sub(pattern, "<dynamic>", value)
     return value
 
