@@ -42,21 +42,21 @@
     "completedClaudeReviewReceived": true,
     "details": "Baseline fields preserve historical evidence. Fixes passed real-dependency CI; local Pillow unavailable. No devices or live Appium tested. See docs/REVIEW_FIXES.md.",
     "stabilizationClaudeApprovalReceived": false,
-    "testMethodsInSource": 103,
-    "ciBehaviorCommit": "45bc9662610284d1eeafa924188d9ace5fa75691",
-    "ciRunUrl": "https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38552550322",
+    "testMethodsInSource": 104,
+    "ciBehaviorCommit": "b77baf10102f30f3db53ded17978264be846d5b6",
+    "ciRunUrl": "https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38554498609",
     "ciMatrix": [
       "ubuntu/python3.11",
       "ubuntu/python3.14",
       "windows/python3.11",
       "windows/python3.14"
     ],
-    "ciTestsRunPerJob": 103,
-    "ciPassingMethodsPerJob": 102,
+    "ciTestsRunPerJob": 104,
+    "ciPassingMethodsPerJob": 103,
     "ciPlatformSkipsPerJob": 1,
     "ciErrorsPerJob": 0,
     "ciFailuresPerJob": 0,
-    "localPassingMethods": 59,
+    "localPassingMethods": 60,
     "localDiscoveryErrors": 3,
     "localFullSuitePassed": false
   }

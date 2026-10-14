@@ -9,7 +9,8 @@
 - Rejected malformed/missing/empty evidence, failed baseline assertions/actions, missing candidate actions, invalid images/hierarchies, and bad timing values.
 - Combined both-device reset/input evidence and made every failed/missing candidate branch partial; retained reset evidence after action errors.
 - Required positive common OS difference excluding hardware fingerprint portions, verified iOS physical enumeration, and added post-run app/OS/target identity checks.
-- Hardened Appium readiness/base-path/spawn/timeout cleanup, private emulator logs, PowerShell Python setup failures, and shared ADB lookup.
+- Hardened Appium readiness/base-path/spawn/timeout cleanup, private emulator logs, PowerShell Python setup failures, shared ADB lookup, and Windows command launcher resolution.
+- Included custom input rules, expanded scenario values, and virtual target IDs in retained server-log sanitization.
 - Removed global SDK stubs and added Windows/Linux Python 3.11/3.14 CI with independent module and CLI argument checks. See docs/REVIEW_FIXES.md for exact results and compatibility changes.
 - Updated comments, configuration notes, developer handoff, and privacy/coverage documentation. Version remains 0.5.0; no real-device validation is claimed.
 

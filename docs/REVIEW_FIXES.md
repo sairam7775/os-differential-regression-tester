@@ -40,7 +40,9 @@ and PIN leakage; the same fixes cover them.
   invalid state evidence yield INVALID. Missing candidate actions are critical regressions.
 - Continued scenario failures and false assertions keep status failed. Known configured
   environment values, expanded inline input values, and target IDs are sanitized in
-  XML, nested metadata, errors, traces, summaries, and retained local server logs.
+  XML, nested metadata, errors, traces, summaries, and retained local server logs. Custom
+  input-rule values, expanded scenario inputs, and virtual target IDs also reach
+  server-log sanitization rather than relying only on default environment names.
 - Both devices contribute reset/input evidence. Every failed or missing candidate
   branch is partial. Source/capture failures preserve prior successful states.
   Fingerprints follow input filling and exclude transient process IDs.
@@ -51,30 +53,36 @@ and PIN leakage; the same fixes cover them.
   readiness flag, honors local address/base path, closes failed-spawn handles, and
   terminates/waits after timeout. External servers remain operator-owned. Shared
   SDK-root/PATH ADB lookup and explicit PowerShell Python exit checks fix setup gaps.
+  The version probe now resolves Windows npm.cmd before invoking it, fixing a
+  locally reproduced false missing-npm result.
 - Removed global SDK stubs. CI installs real dependencies, serializes real Appium
   capabilities, compiles, runs the suite and each module independently, and checks CLI arguments.
 
 ## Actual validation
 
-Behavior commit 45bc9662610284d1eeafa924188d9ace5fa75691 passed
-[CI run 38552550322](https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38552550322).
-There are 103 test methods across five modules, compared with 38 in the import.
+Behavior commit b77baf10102f30f3db53ded17978264be846d5b6 passed
+[CI run 38554498609](https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38554498609).
+There are 104 test methods across five modules, compared with 38 in the import.
 
 | Environment | Full suite | Independent modules, compile, CLI argument paths |
 | --- | --- | --- |
-| Ubuntu/Python 3.11 | 103 run; 102 passed, 1 Windows-only skip; zero errors/failures | Passed |
-| Ubuntu/Python 3.14 | 103 run; 102 passed, 1 Windows-only skip; zero errors/failures | Passed |
-| Windows/Python 3.11 | 103 run; 102 passed, 1 POSIX permission skip; zero errors/failures | Passed |
-| Windows/Python 3.14 | 103 run; 102 passed, 1 POSIX permission skip; zero errors/failures | Passed |
+| Ubuntu/Python 3.11 | 104 run; 103 passed, 1 Windows-only skip; zero errors/failures | Passed |
+| Ubuntu/Python 3.14 | 104 run; 103 passed, 1 Windows-only skip; zero errors/failures | Passed |
+| Windows/Python 3.11 | 104 run; 103 passed, 1 POSIX permission skip; zero errors/failures | Passed |
+| Windows/Python 3.14 | 104 run; 103 passed, 1 POSIX permission skip; zero errors/failures | Passed |
+
+Local help/argument paths for every CLI command passed. A real doctor invocation
+now recognizes npm 11.16.0 and exits 1 for missing Appium, ADB, JAVA_HOME, and its
+UiAutomator2 doctor prerequisite; those checks do not perform a device run.
 
 The first CI run exposed a Windows report-test decoding failure; it now reads UTF-8
 HTML explicitly. Capability tests executed using installed Appium, without global
 stubs. CI also checks the final documentation head; consult PR #2 checks for its SHA.
 
-Restricted local Windows/Python 3.14.7 full discovery loaded 62 entries: 59 methods
+Restricted local Windows/Python 3.14.7 full discovery loaded 63 entries: 60 methods
 passed, three discovery errors (Pillow unavailable in test_hardening, test_regressions,
 and test_review_artifacts), exit 1. Independent market tests (15), review-fix tests
-(44), and compile passed. Installation remains blocked locally; this is not a local
+(45), and compile passed. Installation remains blocked locally; this is not a local
 full-suite pass. [BASELINE_ASSESSMENT.md](BASELINE_ASSESSMENT.md) preserves original results.
 
 No physical devices, emulators, simulators, printers, or live Appium sessions were
