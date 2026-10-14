@@ -136,8 +136,9 @@ class MarketModeTests(unittest.TestCase):
             def get_window_size(self): return {"width": 390, "height": 844}
             def quit(self): pass
 
-        fake_webdriver = types.SimpleNamespace(Remote=lambda *a, **k: Driver())
-        with patch.object(market_module.platform, "system", return_value="Darwin"),              patch.dict(sys.modules, {"appium": types.SimpleNamespace(webdriver=fake_webdriver)}):
+        with patch.object(market_module.platform, "system", return_value="Darwin"), \
+             patch.object(market_module, "_physical_ios_device_ids", return_value={"UDID"}), \
+             patch.object(market_module, "_new_probe_session", return_value=Driver()):
             result = market_module.probe_ios_market_device(
                 "http://127.0.0.1:4723", "UDID", "com.example.market", True
             )

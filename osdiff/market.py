@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 from osdiff.fsutil import private_dir, write_json
+from osdiff.devices import adb_path
 
 
 def _run(cmd, timeout=30, check=True):
@@ -37,13 +38,13 @@ def _run(cmd, timeout=30, check=True):
 
 def _adb(serial, *args, timeout=30, check=True):
     """Target exactly one serial for each ADB probe; ADB currently resolves through PATH only."""
-    adb = shutil.which("adb") or "adb"
+    adb = adb_path() or "adb"
     return _run([adb, "-s", serial, *args], timeout=timeout, check=check)
 
 
 def list_android_devices():
     """Parse authorized adb devices -l entries; callers still need to reject emulators."""
-    adb = shutil.which("adb") or "adb"
+    adb = adb_path() or "adb"
     out = _run([adb, "devices", "-l"], check=False)
     devices = []
     for line in out.splitlines()[1:]:
@@ -169,6 +170,8 @@ def probe_android_market_device(serial, package_id, allowed_installers=None, app
     api_level = _adb(serial, "shell", "getprop", "ro.build.version.sdk", check=False)
     build_fp = _adb(serial, "shell", "getprop", "ro.build.fingerprint", check=False)
     security_patch = _adb(serial, "shell", "getprop", "ro.build.version.security_patch", check=False)
+    build_id = _adb(serial, "shell", "getprop", "ro.build.id", check=False)
+    incremental = _adb(serial, "shell", "getprop", "ro.build.version.incremental", check=False)
     environment = _android_environment(serial)
 
     return {
@@ -177,6 +180,7 @@ def probe_android_market_device(serial, package_id, allowed_installers=None, app
         "deviceName": device or model or "Android",
         "osVersion": os_release, "apiLevel": api_level,
         "securityPatch": security_patch or None, "buildFingerprint": build_fp or None,
+        "buildId": build_id or None, "buildIncremental": incremental or None,
         "screenSize": environment.get("screenSize"), "environment": environment,
         "appId": package_id, "appVersion": version_name, "appBuild": version_code,
         "appActivity": resolved_activity, "installerPackage": installer,
@@ -204,6 +208,27 @@ def _normalize_ios_apps(raw):
     return []
 
 
+def _physical_ios_device_ids():
+    """Read the host's physical-device section rather than infer physical from missing caps."""
+    output = _run(["xcrun", "xctrace", "list", "devices"], timeout=30)
+    devices, physical = set(), False
+    for line in output.splitlines():
+        if line.strip().startswith("=="):
+            physical = line.strip().startswith("== Devices")
+            continue
+        if physical:
+            match = re.search(r"\(([A-Za-z0-9-]{20,})\)\s*$", line)
+            if match:
+                devices.add(match.group(1))
+    return devices
+
+
+def _new_probe_session(server_url, runtime):
+    from appium import webdriver
+    from osdiff.runner import _options
+    return webdriver.Remote(server_url, options=_options(runtime, "ios"))
+
+
 def probe_ios_market_device(server_url, udid, bundle_id, app_store_confirmed=False):
     """Use a temporary XCUITest session to inspect one preinstalled physical-device app.
     
@@ -211,11 +236,10 @@ def probe_ios_market_device(server_url, udid, bundle_id, app_store_confirmed=Fal
     attestation; absent simulator metadata currently does not prove physical identity."""
     if platform.system() != "Darwin":
         raise RuntimeError("iOS real-device market testing requires macOS with Xcode.")
-    from appium import webdriver
-    from osdiff.runner import _options
-
+    if udid not in _physical_ios_device_ids():
+        raise RuntimeError("iOS target is not verified as a physical device on this host")
     runtime = {"udid": udid, "deviceName": "iPhone", "preinstalled": True, "noReset": True}
-    driver = webdriver.Remote(server_url, options=_options(runtime, "ios"))
+    driver = _new_probe_session(server_url, runtime)
     try:
         caps = dict(driver.capabilities or {})
         try:
@@ -284,11 +308,20 @@ def probe_ios_market_device(server_url, udid, bundle_id, app_store_confirmed=Fal
 
 
 def _os_identity(device):
-    """Form a version/API/patch/build tuple, currently substituting empty strings for unknowns."""
-    return tuple(
-        str(device.get(key) or "")
-        for key in ("osVersion", "apiLevel", "securityPatch", "buildFingerprint")
-    )
+    """OS-only identity; manufacturer/product/device portions of Android fingerprints are excluded."""
+    def known(value):
+        text = str(value or "").strip()
+        return "" if text.lower() in {"unknown", "null", "none", "n/a"} else text
+    build = known(device.get("buildId"))
+    incremental = known(device.get("buildIncremental"))
+    if device.get("platform") == "android":
+        match = re.match(r"[^/]+/[^/]+/[^:]+:([^/]+)/([^/]+)/([^:]+):", known(device.get("buildFingerprint")))
+        if match:
+            build = build or known(match.group(2))
+            incremental = incremental or known(match.group(3))
+    else:
+        build = build or known(device.get("buildFingerprint"))
+    return tuple(known(device.get(key)) for key in ("osVersion", "apiLevel", "securityPatch")) + (build, incremental)
 
 
 def _environment_differences(baseline, candidate):
@@ -312,6 +345,12 @@ def validate_market_pair(baseline, candidate, require_same_model=False, require_
     configured; missing OS fields currently can create a false difference, and
     physicalDevice is assumed from the probe rather than rechecked here."""
     errors, warnings = [], []
+    if not baseline.get("deviceId") or not candidate.get("deviceId"):
+        errors.append("device_identity_unavailable")
+    if baseline.get("physicalDevice") is not True or candidate.get("physicalDevice") is not True:
+        errors.append("physical_device_not_verified")
+    if not baseline.get("appId") or not candidate.get("appId"):
+        errors.append("app_id_unavailable")
     if baseline.get("deviceId") == candidate.get("deviceId"):
         errors.append("baseline_and_candidate_device_ids_must_differ")
     if baseline.get("platform") != candidate.get("platform"):
@@ -330,7 +369,10 @@ def validate_market_pair(baseline, candidate, require_same_model=False, require_
     elif str(bbuild) != str(cbuild):
         errors.append("app_build_mismatch")
 
-    if _os_identity(baseline) == _os_identity(candidate):
+    pairs = [(a, b) for a, b in zip(_os_identity(baseline), _os_identity(candidate)) if a and b]
+    if not pairs:
+        errors.append("os_identity_unavailable")
+    if not any(a != b for a, b in pairs):
         errors.append("os_identity_must_differ")
     if not baseline.get("marketOriginVerified"):
         errors.append("baseline_market_origin_not_verified")
@@ -386,7 +428,7 @@ def market_runtime(device, platform_name, *, reset_strategy=None, reset_command=
         runtime.update(
             appPackage=device["appId"], appActivity=device.get("appActivity"),
             autoGrantPermissions=False,
-            adbPath=shutil.which("adb"),
+            adbPath=adb_path(),
             resetStrategy=reset_strategy or "android_clear_data",
         )
     else:

@@ -31,9 +31,29 @@ TOOL_ROOT = HERE
 sys.path.insert(0, str(TOOL_ROOT))
 
 from osdiff import devices
-from osdiff.compare import compare_platform, write_report
-from osdiff.fsutil import private_dir, write_json
+from osdiff.fsutil import private_dir, redact_values, write_json
 
+
+_RUN_LOCK_HANDLES = {}
+
+def compare_platform(*args, **kwargs):
+    # Help/doctor/listing must remain usable before optional image dependencies are installed.
+    from osdiff.compare import compare_platform as compare
+    return compare(*args, **kwargs)
+
+def write_report(*args, **kwargs):
+    from osdiff.compare import write_report as report
+    return report(*args, **kwargs)
+
+def _file_lock(fd, unlock=False):
+    """Kernel ownership replaces unsafe PID polling and survives process crashes."""
+    os.lseek(fd, 0, os.SEEK_SET)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(fd, msvcrt.LK_UNLCK if unlock else msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN if unlock else fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 def load_config(path):
     """Read JSON and attach the absolute config path/directory for relative resolution."""
@@ -82,11 +102,11 @@ def appium_env():
 
 
 def appium_ready(url):
-    """Treat HTTP 200 from serverUrl/status as ready; payload validity is not checked yet."""
-    endpoint = url.rstrip("/") + "/status"
+    """Require the Appium readiness payload, not a generic HTTP 200 page."""
     try:
-        with urllib.request.urlopen(endpoint, timeout=1.5) as response:
-            return response.status == 200
+        with urllib.request.urlopen(url.rstrip("/") + "/status", timeout=1.5) as response:
+            payload = json.load(response)
+            return response.status == 200 and isinstance(payload, dict) and isinstance(payload.get("value"), dict) and payload["value"].get("ready") is True
     except Exception:
         return False
 
@@ -126,6 +146,8 @@ def start_appium(cfg, run_root=None):
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise RuntimeError(f"Unsupported Appium serverUrl: {url}")
+    if parsed.scheme != "http":
+        raise RuntimeError("Local Appium auto-start requires an HTTP URL; configure TLS externally")
     host = parsed.hostname
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     if host not in ("127.0.0.1", "localhost", "::1"):
@@ -148,7 +170,9 @@ def start_appium(cfg, run_root=None):
         [
             exe,
             "--address",
-            "127.0.0.1",
+            host,
+            "--base-path",
+            parsed.path.rstrip("/") or "/",
             "--port",
             str(port),
             "--log-level",
@@ -170,8 +194,10 @@ def start_appium(cfg, run_root=None):
 
     try:
         proc.terminate()
+        proc.wait(timeout=8)
     except Exception:
-        pass
+        proc.kill()
+        proc.wait(timeout=8)
     _redact_file(log, appium_cfg.get("sensitiveEnvNames", []))
     raise RuntimeError(f"Appium did not start. See redacted log: {log}")
 
@@ -233,52 +259,80 @@ def _new_run_root(suffix="", cfg=None):
 
 
 def _pid_alive(pid):
-    """Probe a lock owner's PID; the current os.kill(pid, 0) is unsafe on Windows.
-    
-    Do not call this against a live Windows process as a diagnostic. Replace the
-    probe as described in docs/BASELINE_ASSESSMENT.md before relying on the lock."""
+    """Conservatively check legacy lock owners without terminating Windows processes."""
     try:
-        os.kill(int(pid), 0)
+        pid = int(pid)
+        if pid <= 0:
+            return False
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+            handle = kernel.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return ctypes.get_last_error() != 87  # Access denied is not proof of absence.
+            try:
+                code = wintypes.DWORD()
+                return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
+            finally:
+                kernel.CloseHandle(handle)
+        os.kill(pid, 0)
         return True
-    except (OSError, ValueError):
+    except PermissionError:
+        return True
+    except (OSError, ValueError, OverflowError):
         return False
 
 
 def _acquire_run_lock():
-    """Create the tool-root lock exclusively, attempting stale-PID recovery if it exists.
-    
-    The lock covers only this tool directory. Liveness, PID reuse, and stale-owner
-    races remain unresolved; the caller must arrange release on every exit path."""
-    lock = TOOL_ROOT / ".osdiff-run.lock"
+    """Acquire a non-inherited kernel lock; empty/dead new-owner files are reusable."""
+    lock = (TOOL_ROOT / ".osdiff-run.lock").resolve()
+    if str(lock) in _RUN_LOCK_HANDLES:
+        raise RuntimeError("Another osdiff run is active")
+    fd = os.open(str(lock), os.O_CREAT | os.O_RDWR, 0o600)
+    acquired = False
     try:
-        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
         try:
-            raw = lock.read_text(encoding="utf-8").strip().split("|", 1)[0]
-            if raw and not _pid_alive(raw):
-                lock.unlink(missing_ok=True)
-                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            else:
-                raise RuntimeError(
-                    f"Another osdiff run appears to be active (lock: {lock}). "
-                    "Parallel run/auto-run/market-run executions are intentionally blocked."
-                )
-        except RuntimeError:
-            raise
-        except Exception as exc:
-            raise RuntimeError(f"Unable to acquire run lock {lock}: {exc}") from exc
-    os.write(fd, f"{os.getpid()}|{time.time()}".encode("utf-8"))
-    os.close(fd)
-    return lock
+            _file_lock(fd)
+            acquired = True
+        except OSError as exc:
+            raise RuntimeError("Another osdiff run is active") from exc
+        raw = os.read(fd, 512).decode("utf-8", errors="replace").strip()
+        fields = raw.split("|")
+        # Older releases used only exclusive creation. Respect a live legacy owner.
+        if len(fields) == 2 and fields[0].isdigit() and _pid_alive(fields[0]):
+            raise RuntimeError("A legacy osdiff run is active")
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}|{time.time()}|kernel-v1".encode("utf-8"))
+        os.fsync(fd)
+        _RUN_LOCK_HANDLES[str(lock)] = fd
+        return lock
+    except Exception:
+        if acquired:
+            _file_lock(fd, unlock=True)
+        os.close(fd)
+        raise
 
 
 def _release_run_lock(lock):
-    """Best-effort lock-file removal; main currently does not call this helper."""
-    if lock:
+    """Release only our descriptor; keep the inode so contenders cannot split ownership."""
+    if lock is None:
+        return
+    fd = _RUN_LOCK_HANDLES.pop(str(Path(lock).resolve()), None)
+    if fd is None:
+        return
+    try:
+        os.ftruncate(fd, 0)
+    finally:
         try:
-            Path(lock).unlink(missing_ok=True)
-        except Exception:
-            pass
+            _file_lock(fd, unlock=True)
+        finally:
+            os.close(fd)
 
 def scenario_files(args):
     """Resolve explicit scenario arguments from cwd, or enumerate tool-local JSON examples."""
@@ -367,6 +421,7 @@ def run_one_platform(cfg, platform_name, run_root, scenarios):
                 platform_cfg.get("abi", "x86_64"),
                 platform_cfg.get("deviceProfile", "pixel"),
                 recreate=bool(platform_cfg.get("recreateDeviceEachRun", True)),
+                log_root=run_root / "android" / "emulator-logs",
             )
             execution["baseline"] = run_target(
                 server,
@@ -390,6 +445,7 @@ def run_one_platform(cfg, platform_name, run_root, scenarios):
                 platform_cfg.get("abi", "x86_64"),
                 platform_cfg.get("deviceProfile", "pixel"),
                 recreate=bool(platform_cfg.get("recreateDeviceEachRun", True)),
+                log_root=run_root / "android" / "emulator-logs",
             )
             execution["candidate"] = run_target(
                 server,
@@ -524,6 +580,7 @@ def auto_crawl_one_platform(cfg, platform_name, run_root):
                 platform_cfg.get("abi", "x86_64"),
                 platform_cfg.get("deviceProfile", "pixel"),
                 recreate=bool(platform_cfg.get("recreateDeviceEachRun", True)),
+                log_root=run_root / "android" / "emulator-logs",
             )
             baseline_graph = crawl_baseline(
                 server,
@@ -548,6 +605,7 @@ def auto_crawl_one_platform(cfg, platform_name, run_root):
                 platform_cfg.get("abi", "x86_64"),
                 platform_cfg.get("deviceProfile", "pixel"),
                 recreate=bool(platform_cfg.get("recreateDeviceEachRun", True)),
+                log_root=run_root / "android" / "emulator-logs",
             )
             candidate_replay = replay_candidate_graph(
                 server,
@@ -805,7 +863,7 @@ def doctor(args):
             if wants_market:
                 add("Real-device WDA signing", True, "verify provisioning/signing during first market-run session")
 
-    print(f"\nOS Differential Regression Tester — doctor ({mode}/{requested_platform})\n")
+    print(f"\nOS Differential Regression Tester â€” doctor ({mode}/{requested_platform})\n")
     for name, ok, detail in rows:
         compact = " ".join(str(detail).split())
         if len(compact) > 180:
@@ -819,7 +877,7 @@ def list_targets(args):
     print("\nAndroid AVDs")
     emulator = devices.emulator_path()
     if emulator:
-        result = subprocess.run([emulator, "-list-avds"], text=True, capture_output=True)
+        result = subprocess.run([emulator, "-list-avds"], text=True, capture_output=True, timeout=30)
         print(result.stdout.strip() or "(none)")
     else:
         print("(emulator tool not found)")
@@ -1120,6 +1178,27 @@ def market_run_cmd(args):
         coverage = {platform_name: coverage_item}
         write_json(report_root / "coverage.json", coverage)
 
+        # Detect store auto-updates or target identity changes during the run.
+        try:
+            if platform_name == "android":
+                final_b = market.probe_android_market_device(args.baseline_device, args.app_id, allowed_installers=allowed, app_activity=args.app_activity)
+                final_c = market.probe_android_market_device(args.candidate_device, args.app_id, allowed_installers=allowed, app_activity=args.app_activity)
+            else:
+                final_b = market.probe_ios_market_device(server, args.baseline_device, args.app_id, app_store_confirmed=args.ios_app_store_confirmed)
+                final_c = market.probe_ios_market_device(server, args.candidate_device, args.app_id, app_store_confirmed=args.ios_app_store_confirmed)
+            final_validation = market.validate_market_pair(final_b, final_c, require_same_model=require_same_model,
+                require_matching_environment=bool(policy.get("requireMatchingEnvironment", True)))
+            for role, before, after in (("baseline", baseline, final_b), ("candidate", candidate, final_c)):
+                if any(str(before.get(k)) != str(after.get(k)) for k in ("appId", "appVersion", "appBuild")):
+                    final_validation["errors"].append(f"{role}_app_changed_during_run")
+                if market._os_identity(before) != market._os_identity(after):
+                    final_validation["errors"].append(f"{role}_os_changed_during_run")
+            final_validation["valid"] = not final_validation["errors"]
+            final_validation["postRunIdentityVerified"] = final_validation["valid"]
+            provenance = market.write_provenance(report_root / "device-provenance.json", baseline, candidate, final_validation)
+        except Exception:
+            validation = dict(validation, valid=False, errors=[*validation.get("errors", []), "post_run_identity_unavailable"], postRunIdentityVerified=False)
+            provenance = market.write_provenance(report_root / "device-provenance.json", baseline, candidate, validation)
         results = compare_platform(
             run_root, platform_name, cfg["comparison"], report_root
         )
@@ -1260,8 +1339,12 @@ def main():
         print("\nCancelled.")
         return 130
     except Exception as exc:
-        print(f"\nERROR: {exc}", file=sys.stderr)
+        secrets = [os.getenv(name) for name in ("TEST_USER_EMAIL", "TEST_USER_PASSWORD")]
+        secrets += [getattr(args, "baseline_device", None), getattr(args, "candidate_device", None)]
+        print("\nERROR: " + redact_values(str(exc), secrets), file=sys.stderr)
         return 1
+    finally:
+        _release_run_lock(lock)
 
 
 if __name__ == "__main__":

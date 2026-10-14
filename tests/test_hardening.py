@@ -22,34 +22,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# Lightweight import stubs let pure crawler logic be tested before setup-local installs Appium/Selenium.
-if "appium" not in sys.modules:
-    appium = types.ModuleType("appium")
-    appium.webdriver = types.SimpleNamespace(Remote=lambda *a, **k: None)
-    sys.modules["appium"] = appium
-    for name in ["appium.options", "appium.options.android", "appium.options.ios", "appium.webdriver", "appium.webdriver.common", "appium.webdriver.common.appiumby"]:
-        sys.modules.setdefault(name, types.ModuleType(name))
-
-    class DummyOptions:
-        def __setattr__(self, name, value):
-            object.__setattr__(self, name, value)
-
-    sys.modules["appium.options.android"].UiAutomator2Options = DummyOptions
-    sys.modules["appium.options.ios"].XCUITestOptions = DummyOptions
-
-    class AppiumBy:
-        ID = "id"; ACCESSIBILITY_ID = "accessibility_id"; XPATH = "xpath"; CLASS_NAME = "class_name"
-        ANDROID_UIAUTOMATOR = "android_uiautomator"; IOS_PREDICATE = "ios_predicate"; IOS_CLASS_CHAIN = "ios_class_chain"
-    sys.modules["appium.webdriver.common.appiumby"].AppiumBy = AppiumBy
-
-if "selenium" not in sys.modules:
-    for name in ["selenium", "selenium.webdriver", "selenium.webdriver.support", "selenium.webdriver.support.ui"]:
-        sys.modules.setdefault(name, types.ModuleType(name))
-    class WebDriverWait:
-        def __init__(self, driver, timeout): self.driver = driver
-        def until(self, fn): return fn(self.driver)
-    sys.modules["selenium.webdriver.support.ui"].WebDriverWait = WebDriverWait
-
+# Dependencies stay real; individual driver/process boundaries are mocked per test.
 from osdiff import crawler
 from osdiff.compare import compare_platform, write_report
 

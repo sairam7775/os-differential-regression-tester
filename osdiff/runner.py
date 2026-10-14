@@ -14,17 +14,13 @@ import time
 import traceback
 from pathlib import Path
 
-from osdiff.fsutil import mask_image_regions, private_dir, private_file, redact_values, write_json, write_text
+from osdiff.fsutil import mask_image_regions, private_dir, private_file, redact_data, redact_xml, write_json, write_text
 
-from appium import webdriver
-from appium.options.android import UiAutomator2Options
-from appium.options.ios import XCUITestOptions
-from appium.webdriver.common.appiumby import AppiumBy
-from selenium.webdriver.support.ui import WebDriverWait
 
 
 def _loc(platform, spec):
     """Translate a platform-specific or shared scenario locator into Selenium/Appium strategy/value."""
+    from appium.webdriver.common.appiumby import AppiumBy
     if platform in spec:
         spec = spec[platform]
     strategy = spec["strategy"]
@@ -45,6 +41,7 @@ def _loc(platform, spec):
 
 def _find(driver, platform, locator, timeout=10):
     """Wait for locator presence, not automatically for visibility or clickability."""
+    from selenium.webdriver.support.ui import WebDriverWait
     by, value = _loc(platform, locator)
     return WebDriverWait(driver, timeout).until(lambda d: d.find_element(by, value))
 
@@ -99,8 +96,12 @@ def _options(runtime, platform):
     Explicit udid prevents implicit device selection. The caller supplies reset
     semantics; market helpers set preinstalled=True and noReset=True. Never add
     install/replacement capabilities to the normal market runtime."""
+    from appium.options.android import UiAutomator2Options
+    from appium.options.ios import XCUITestOptions
     preinstalled = bool(runtime.get("preinstalled", False))
     app_path = runtime.get("appPath")
+    if preinstalled and app_path:
+        raise ValueError("Preinstalled market runtime must not contain an app binary")
     app = str(Path(app_path).resolve()) if app_path else None
 
     if platform == "android":
@@ -171,7 +172,7 @@ def _execute(driver, platform, step):
         raise ValueError(f"Unsupported step type: {typ}")
 
 
-def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle_seconds, sensitive_env_names=None, sensitive_regions=None):
+def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle_seconds, sensitive_env_names=None, sensitive_regions=None, sensitive_device_ids=None):
     """Evaluate readiness assertions, settle, and persist screenshot/source/state artifacts.
     
     Assertions returning false do not stop capture. recentActions covers steps since
@@ -187,12 +188,14 @@ def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle
     time.sleep(max(0.0, float(step.get("settleSeconds", settle_seconds))))
 
     screenshot = folder / "screen.png"
-    driver.save_screenshot(str(screenshot))
+    if driver.save_screenshot(str(screenshot)) is False or not screenshot.is_file():
+        raise RuntimeError("Screenshot capture failed")
     mask_image_regions(screenshot, (sensitive_regions or {}).get(platform, []))
     private_file(screenshot)
     source = driver.page_source or ""
     secrets = [os.getenv(name) for name in (sensitive_env_names or []) if os.getenv(name)]
-    write_text(folder / "source.xml", redact_values(source, secrets))
+    secrets += [value for value in (sensitive_device_ids or []) if value]
+    write_text(folder / "source.xml", redact_xml(source, secrets))
     state = {
         "scenario": scenario_name,
         "checkpoint": step["id"],
@@ -202,7 +205,13 @@ def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle
         "windowSize": driver.get_window_size(),
         "capturedEpoch": time.time(),
     }
-    write_json(folder / "state.json", state)
+    write_json(folder / "state.json", state, sensitive_values=secrets)
+    return state
+
+
+def _new_session(server_url, runtime, platform):
+    from appium import webdriver
+    return webdriver.Remote(server_url, options=_options(runtime, platform))
 
 
 def run_scenario(server_url, runtime, platform, scenario, out_root):
@@ -221,12 +230,12 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
     }
     recent = []
     try:
-        driver = webdriver.Remote(server_url, options=_options(runtime, platform))
+        driver = _new_session(server_url, runtime, platform)
         for step in scenario["steps"]:
             if step.get("platforms") and platform not in step["platforms"]:
                 continue
             if step["type"] == "checkpoint":
-                _checkpoint(
+                state = _checkpoint(
                     driver,
                     platform,
                     scenario["name"],
@@ -236,14 +245,17 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
                     runtime.get("checkpointSettleSeconds", 0.25),
                     runtime.get("sensitiveEnvNames", ["TEST_USER_EMAIL", "TEST_USER_PASSWORD"]),
                     runtime.get("sensitiveRegions", {}),
+                    [runtime.get("udid")],
                 )
+                if any(item.get("passed") is not True for item in state["assertions"]):
+                    run["assertionFailed"] = True
                 run["checkpointsCaptured"].append(step["id"])
                 run["completedSteps"] += 1
                 recent = []
                 continue
 
             rec = {"type": step["type"], "status": "running", "error": None}
-            start = time.time()
+            start = time.perf_counter()
             try:
                 _execute(driver, platform, step)
                 rec["status"] = "passed"
@@ -253,11 +265,14 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
                 if not step.get("continueOnFailure", False):
                     raise
             finally:
-                rec["durationSeconds"] = round(time.time() - start, 3)
+                rec["durationSeconds"] = round(time.perf_counter() - start, 3)
                 run["actions"].append(rec)
                 recent.append(rec)
                 run["completedSteps"] += 1
-        run["status"] = "passed"
+        failed = run.get("assertionFailed") or any(action["status"] != "passed" for action in run["actions"])
+        run["status"] = "failed" if failed else "passed"
+        if failed:
+            run["error"] = "Scenario contains failed actions or assertions"
     except Exception as exc:
         run["status"] = "failed"
         run["error"] = f"{type(exc).__name__}: {exc}"
@@ -268,7 +283,8 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
                 driver.quit()
             except Exception:
                 pass
-    return run
+    secrets = [runtime.get("udid"), *[os.getenv(name) for name in runtime.get("sensitiveEnvNames", ["TEST_USER_EMAIL", "TEST_USER_PASSWORD"])]]
+    return redact_data(run, secrets)
 
 
 def run_target(server_url, runtime, platform, scenarios, output):

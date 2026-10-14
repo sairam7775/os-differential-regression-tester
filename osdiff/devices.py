@@ -14,6 +14,10 @@ import shutil
 import socket
 import subprocess
 import time
+import uuid
+import re
+
+from osdiff.fsutil import private_dir, private_file
 from pathlib import Path
 
 
@@ -139,6 +143,7 @@ def prepare_android(
     device="pixel",
     recreate=True,
     boot_timeout_seconds=240,
+    log_root=None,
 ):
     """Install the requested image, launch an isolated emulator, and verify actual API level.
     
@@ -174,9 +179,11 @@ def prepare_android(
 
     port = choose_emulator_port(adb)
     serial = f"emulator-{port}"
-    log = Path.cwd() / f"{avd}.emulator.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
+    log_dir = private_dir(log_root or (Path.cwd() / "runs" / "emulator-logs"))
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", avd)
+    log = log_dir / f"{safe_name}-{uuid.uuid4().hex[:8]}.emulator.log"
     log_handle = log.open("w", encoding="utf-8")
+    private_file(log)
     proc = subprocess.Popen(
         [
             emulator,
