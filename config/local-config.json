@@ -66,7 +66,9 @@
       "resource-id",
       "content-desc",
       "enabled",
-      "clickable"
+      "clickable",
+      "text",
+      "value"
     ],
     "hierarchyIgnoreValuePatterns": [],
     "ignoreRegions": {
@@ -120,7 +122,14 @@
       "factory\\s*reset",
       "\\bpair\\b",
       "\\bconnect(?:ion)?\\b",
-      "\\bbluetooth\\b"
+      "\\bbluetooth\\b",
+      "\\b(?:un)?pair(?:ing|ed|s)?\\b",
+      "\\b(?:dis)?connect(?:ion|ions|ing|ed|s)?\\b",
+      "\\bpay(?:ment|ments)?\\b",
+      "\\bpurchases?\\b",
+      "\\b(?:checkout|reorder|forget|install|update)\\b",
+      "\\bclear\\s+(?:data|storage|cache)\\b",
+      "\\bforce\\s+stop\\b"
     ],
     "allowKeywords": [
       "\\ballow\\b",
@@ -137,8 +146,9 @@
         "env": "TEST_USER_EMAIL"
       },
       {
-        "pattern": "password|passcode|pin",
-        "env": "TEST_USER_PASSWORD"
+        "pattern": "\\b(?:password|passcode|pin)\\b",
+        "env": "TEST_USER_PASSWORD",
+        "secret": true
       }
     ],
     "fingerprintAttributes": [
@@ -162,19 +172,10 @@
     "allowedSystemPackages": {
       "android": [
         "com.android.permissioncontroller",
-        "com.google.android.permissioncontroller",
-        "com.android.packageinstaller",
-        "com.google.android.providers.media.module",
-        "com.android.providers.media.module",
-        "com.android.settings",
-        "com.google.android.documentsui",
-        "com.android.documentsui"
+        "com.google.android.permissioncontroller"
       ],
       "ios": [
-        "com.apple.springboard",
-        "com.apple.Preferences",
-        "com.apple.mobileslideshow",
-        "com.apple.DocumentsApp"
+        "com.apple.springboard"
       ]
     }
   },
