@@ -7,11 +7,11 @@ describes policy; [ARTIFACTS.md](ARTIFACTS.md) describes persisted evidence.
 
 1. Pop a baseline path from a breadth-first queue, initially empty.
 2. Create/reuse a target-specific session, terminate/reset/activate, and verify foreground.
-3. Before each replay action, verify foreground and fill permitted inputs. Blocked prerequisites fail the path.
+3. Before each replay action, verify foreground and fill permitted inputs. Unruled plain fields stay empty and recorded; refused secrets or missing baseline-filled prerequisites fail the path.
 4. Refresh source and native identity, validate live safety, execute once, and verify foreground afterward.
 5. Fill inputs at the destination, refresh hierarchy/context, then fingerprint the captured state.
 6. Skip duplicate fingerprints while retaining blockers. For a new state, discover/filter/cap actions and capture sanitized evidence.
-7. Queue child paths unless depth/other limits stop exploration.
+7. Queue child paths with stable IDs of baseline-filled inputs required for replay, unless depth/other limits stop exploration.
 8. Persist graph/summary, then replay one retained path per baseline screen on the candidate.
 
 A session is reused per phase and closed/recreated after replay/state failure.
@@ -32,7 +32,11 @@ and descendant safety before clicking once. Unverified legacy records and unsafe
 or changed controls fail. Bounds are informational; no coordinate fallback is used.
 
 Mandatory safe-mode rules cover prohibited hardware, payment, and destructive
-labels plus their common inflections. Custom deny rules add to this floor.
+labels plus their common inflections. Generic order/status words are not
+mandatory; individual captions still block bare Order and purchase imperatives.
+Order history, Updates, Recently removed, and Last updated cards are navigable
+with shipped policy. Connected devices, Print preview, Printer status, and
+Remove from favourites remain conservatively blocked. Custom rules add to the floor.
 Only target-app controls and narrow Android/iOS permission dialogs may be traversed.
 Settings/installers/arbitrary external apps are rejected even if custom-listed.
 Secret rules require native secure-field evidence before typing; unknown or

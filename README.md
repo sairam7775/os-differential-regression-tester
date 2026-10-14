@@ -19,7 +19,9 @@ CI installs real dependencies and runs the full suite plus every test module
 independently on Windows/Linux with Python 3.11/3.14. See the review-fix record for
 exact commits, counts, and platform skips. Local Pillow installation remains blocked.
 No physical-device, emulator/simulator, or live Appium validation has been performed.
-Claude has not yet approved the stabilization diff.
+Claude re-reviewed commit a85fb29 and confirmed most original fixes. The four
+follow-up findings are addressed in the updated PR; approval of that revision
+and physical-device acceptance remain pending. See the review-fix record.
 
 ## Choose a mode
 

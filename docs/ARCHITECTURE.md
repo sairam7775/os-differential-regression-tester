@@ -43,7 +43,9 @@ runtimes even if a binary was accidentally supplied.
 
 Foreground must be the target app or a narrowly recognized permission dialog.
 Settings, installers, photo/file apps, and arbitrary external surfaces stop the path.
-Custom allowances cannot widen this boundary. Permission surfaces expose only
+Unruled plain inputs remain empty and recorded while navigation continues. Secret
+refusal and missing baseline-filled prerequisites still fail the action. Custom
+allowances cannot widen the foreground boundary. Permission surfaces expose only
 recognized permission buttons, without scrolling or credential entry.
 
 Tap identities include native attributes and descendant captions. Each locator
@@ -62,7 +64,9 @@ than proven destination equivalence. Graph accuracy and richer traversal are fut
 Strict summaries/checkpoints reject malformed JSON, duplicate scenarios, bad
 assertion/action records, failed baseline evidence, invalid XML/images, and empty
 results. Missing candidate actions are critical regressions. Both targets contribute
-reset/input evidence; every failed or missing branch forces PARTIAL. Report
+reset/input evidence, including successful replay blockers; every failed or missing
+branch forces PARTIAL. Build IDs/incrementals establish OS difference only for
+verified matching hardware; other pairs need release/API/security-patch difference. Report
 precedence remains INVALID > FAIL > REVIEW > PASS. See [ARTIFACTS.md](ARTIFACTS.md).
 
 ## Privacy and remaining limitations

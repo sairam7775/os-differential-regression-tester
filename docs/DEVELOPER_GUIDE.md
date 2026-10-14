@@ -102,8 +102,8 @@ contains historical code, so merging that audit is not a rollout of these fixes.
 targets main with stabilization commits. [REVIEW_FIXES.md](REVIEW_FIXES.md) maps
 findings to code/tests and documents deliberate safety compatibility changes.
 Reviewers should inspect the exact current head and report severity, trigger,
-impact, and regression evidence. The follow-up diff has not yet been approved by
-Claude. A GitHub comment does not prove delivery to an already-running local session.
+impact, and regression evidence. Claude re-reviewed a85fb29; its four follow-ups
+are mapped in REVIEW_FIXES.md. The resulting revision is not yet approved by Claude. A GitHub comment does not prove delivery to an already-running local session.
 
 ## Real-device acceptance after stabilization
 

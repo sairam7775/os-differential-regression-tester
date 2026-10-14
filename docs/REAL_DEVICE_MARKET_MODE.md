@@ -26,8 +26,11 @@ the session; missing enumeration fails closed. This requires macOS/Xcode.
 or unequal app version/build, equal OS tuples, unverified origin, and policy
 violations. Same model is optional; comparable environment values are required
 to match by default. Unknown environment fields are skipped. An OS difference
-requires unequal known common release/API/patch/build ID/incremental evidence.
-Hardware-only fingerprint differences and missing values cannot establish it.
+requires unequal known common release/API/patch evidence across differing or
+unverified models. Build ID/incremental may qualify only for verified matching
+manufacturer/model, because vendors encode hardware in these build values too.
+Hardware-only fingerprints, model-specific build variants, and missing values
+cannot establish OS difference on non-comparable hardware.
 Both apps and target/OS identities are re-probed after capture; updates, changes,
 or unavailable post-run probes invalidate provenance.
 

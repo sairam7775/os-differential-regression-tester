@@ -14,7 +14,8 @@ and helpers have current contract docstrings.
 For review, independently verify the current PR head and report actionable findings
 with severity, exact file/line references, triggers, impact, and regression tests.
 PR #1 is the historical audit against the pre-import branch. Review stabilization
-in PR #2, which targets main; follow-up approval is pending. CI runs real dependencies
+in PR #2, which targets main. Claude re-reviewed a85fb29; the follow-up fixes
+still need exact-head approval. CI runs real dependencies
 and independent modules. Locally Pillow remains unavailable. No devices were tested.
 
 Never replace market binaries, weaken version/build equality, call skipped coverage

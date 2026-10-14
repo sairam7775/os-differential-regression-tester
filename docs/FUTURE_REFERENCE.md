@@ -5,7 +5,8 @@
 Detect OS regressions in an unchanged Android/iOS production build, including
 INSTAX companion apps, without rebuilding or replacing the app. Claude completed
 the baseline review in PR #1. PR #2 implements stabilization fixes and targets main.
-The follow-up diff still needs independent review and physical-device acceptance.
+Claude re-reviewed a85fb29 and raised four follow-ups. The current revision
+addresses them and needs exact-head review and physical-device acceptance.
 
 Start with [REVIEW_FIXES.md](REVIEW_FIXES.md), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md),
 [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), and

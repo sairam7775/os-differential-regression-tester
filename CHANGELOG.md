@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased - Claude re-review follow-up (2026-10-14)
+
+- Allowed navigation past unruled plain input fields while retaining blockers and partial coverage; required baseline-filled or secure/secret inputs still stop replay when unmet.
+- Added stable requiredInputs/inputId metadata without credential values and tracked intermediate blockers after successful candidate navigation.
+- Restricted build ID/incremental OS-difference evidence to verified matching hardware; differing/unknown models require release/API/security-patch difference.
+- Allowed generic order/status navigation while retaining prohibited imperatives and conservative hardware/state-mutation boundaries, with explicit label outcome fixtures.
+- Added narrow hierarchy freshness age/clock/date normalization; counts, prices, versions, ordinary dates, missing controls, and failed statuses remain compared. Explicit empty patterns disable defaults.
+- Added 22 regressions and updated contracts/review mapping. CI: 126 methods per job, 125 passed and one platform skip across Windows/Linux Python 3.11/3.14. No devices or live Appium sessions tested.
+
 ## Unreleased - review stabilization (2026-10-14)
 
 - Verified native control identity/per-locator ordinals/descendant safety before automatic taps; removed uncertain coordinate/gesture retries.

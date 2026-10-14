@@ -186,7 +186,7 @@
     ],
     "requireSameHardwareModel": false,
     "iosRequireAppStoreAttestation": true,
-    "notes": "Market runtimes reject target binaries. Exact app version/build and positive known OS difference are mandatory before and after capture. Android data clear preserves the binary; real iOS relaunch is non-deterministic. Both targets contribute reset/input/path coverage. External reset hooks are trusted on zero exit and must preserve binaries. See docs/REVIEW_FIXES.md and docs/CONFIGURATION.md.",
+    "notes": "Market runtimes reject target binaries. Exact app version/build and positive known OS difference are mandatory before and after capture. Android data clear preserves the binary; real iOS relaunch is non-deterministic. Both targets contribute reset/input/path coverage. External reset hooks are trusted on zero exit and must preserve binaries. See docs/REVIEW_FIXES.md and docs/CONFIGURATION.md. Build ID/incremental differences count only for verified matching hardware; other pairs need release/API/security-patch difference.",
     "requireMatchingEnvironment": true,
     "androidResetStrategy": "android_clear_data",
     "iosResetStrategy": "relaunch",

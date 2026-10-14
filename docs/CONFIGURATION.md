@@ -43,7 +43,7 @@ validation and remaining limits; BASELINE_ASSESSMENT.md describes historical def
 | JSON path | Example default | Meaning / limitation |
 | --- | --- | --- |
 | `projectName` | `"My Mobile App"` | Display name in report HTML; informational, not an app identifier. |
-| `appium.serverUrl` | `"http://127.0.0.1:4723"` | Existing Appium URL or local auto-start target. Baseline readiness checks only HTTP 200; custom base-path/TLS/address support is incomplete. |
+| `appium.serverUrl` | `"http://127.0.0.1:4723"` | Existing Appium URL or local auto-start target. Readiness requires Appium value.ready=true. Local HTTP auto-start honors address/base path; TLS must be configured externally. |
 | `appium.startupTimeoutSeconds` | `30` | Seconds allowed for owned server startup; independent of device boot, reset, and element timeouts. |
 | `appium.logLevel` | `"error"` | Appium server verbosity; higher levels can increase sensitive log exposure. |
 | `appium.saveServerLog` | `false` | Retain owned server log after attempted literal redaction when true; default false removes it on normal cleanup. |
@@ -84,7 +84,7 @@ validation and remaining limits; BASELINE_ASSESSMENT.md describes historical def
 | `comparison.minimumDurationRegressionSeconds` | `1.0` | Minimum absolute candidate-minus-baseline seconds, used with the duration factor. |
 | `comparison.hierarchyChangeWarningRatio` | `0.15` | Multiset hierarchy difference fraction triggering REVIEW; not a semantic missing-control guarantee. |
 | `comparison.hierarchyAttributes` | `["type", "class", "name", "label", "resource-id", "content-desc", "enabled", "clickable", "text", "value"]` | Attributes used for nonempty hierarchy signatures; text/value changes are included. |
-| `comparison.hierarchyIgnoreValuePatterns` | `[]` | Case-sensitive Python regex replacements for dynamic hierarchy values before comparison. |
+| `comparison.hierarchyIgnoreValuePatterns` | one freshness-caption pattern; see shipped JSON | Normalize relative age/clock/date values following Last synced/updated/refreshed/checked. General numbers, prices, versions, ordinary dates, and status prefixes remain meaningful. Inline regex flags apply; explicit [] disables defaults. |
 | `comparison.ignoreRegions` | see shipped JSON | Per-platform comparison masks. These do not redact stored screenshots or report originals. |
 | `crawler.safeMode` | `true` | Apply mandatory plus configured deny rules to descendant captions and live controls. Keep enabled for market testing; synthetic checks are not physical safety certification. |
 | `crawler.maxScreens` | `120` | Baseline unique-state limit; reaching configured thresholds conservatively makes coverage partial. |
@@ -94,7 +94,7 @@ validation and remaining limits; BASELINE_ASSESSMENT.md describes historical def
 | `crawler.enableScrolling` | `true` | Queue one whole-window downward swipe when native scrollable content is recognized; no container/back/upward traversal proof. |
 | `crawler.settleSeconds` | `0.6` | Fixed waits around launch/action/capture; included in monotonic action-duration measurements. |
 | `crawler.afterInputSettleSeconds` | `0.3` | Pause after filling inputs before refreshing source for discovered/candidate checkpoint capture. |
-| `crawler.denyKeywords` | array (28 entries); see shipped JSON | Case-insensitive patterns added to the mandatory deny floor; checked against control/descendant captions and live metadata after case/token normalization. |
+| `crawler.denyKeywords` | array (27 entries); see shipped JSON | Case-insensitive patterns added to the mandatory deny floor; checked against control/descendant captions and live metadata after case/token normalization. |
 | `crawler.allowKeywords` | `["\\ballow\\b", "\\bwhile using\\b", "\\bok\\b", "\\bcontinue\\b", "\\bnext\\b", "\\bcancel\\b", "\\bnot now\\b"]` | Retained compatibility metadata; currently does not whitelist actions or override denies. |
 | `crawler.autoInputRules` | array (2 entries); see shipped JSON | Ordered pattern/env or pattern/value dictionaries; first matching rule supplies input. Prefer environment references and dedicated data. |
 | `crawler.fingerprintAttributes` | `["type", "class", "name", "label", "value", "text", "resource-id", "content-desc", "enabled", "clickable", "scrollable"]` | Tree attributes used to discover distinct states; text/value are included by default. |
@@ -139,6 +139,9 @@ blockers. secret=true (or secure=true) requires native password/secure-text-fiel
 evidence; password/PIN/token/secret-named environment rules require it too. The
 shipped password rule uses word boundaries, so shipping/shopping/typing are not
 password fields. Values are sanitized in artifacts; no secret is sent to a plain field.
+Unruled plain fields stay empty and recorded as blockers without aborting unrelated
+navigation. Replay stops for refused secure/secret input or a baseline-filled input
+that is no longer fillable. Successful replay blockers still force partial coverage.
 
 ## Reset policy
 
@@ -166,3 +169,23 @@ non-personal data and preserve the handoff safety/validity constraints.
 
 See ARTIFACTS.md for output fields, SCENARIOS.md for scenario data, and
 REVIEW_FIXES.md for actual validation results and remaining work.
+
+## Safe-mode navigation and text-noise trade-offs
+
+Shipped policy permits Order history, Sort order, In order to continue, Updates,
+Recently removed, and Last updated cards. Bare Order, Place order, Order now,
+Update now, Delete/Remove, and prohibited hardware/payment operations remain blocked.
+Connected devices, Print preview, Printer status, and Remove from favourites are
+intentionally blocked: hardware surfaces and state mutations need separately
+reviewed scenarios. Removing broad custom noun patterns can tune navigation,
+but allowKeywords never overrides mandatory or configured denies. Individual
+descendant captions and live captions are checked, so a bare Order child cannot
+bypass the imperative rule through a generic container label.
+
+Default hierarchy normalizers handle known freshness captions rather than all
+numbers or dates. Artifacts retain original sanitized text. If freshness itself
+is an assertion for the tested flow, set hierarchyIgnoreValuePatterns=[] or use
+narrow app-specific patterns plus explicit assertions. Missing controls, prices,
+counts, versions, date-picker values, and failed status text remain compared.
+Pixel comparison is separate; use configured ignoreRegions for known visual noise
+and sensitiveRegions for storage privacy. This does not remove all dynamic-content noise.

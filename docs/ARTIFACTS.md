@@ -87,6 +87,12 @@ Actions contain `kind` (tap/scroll_down), `label`, and for taps `locators`,
 strategy/value/ordinal over all native matches before filtering. identity contains
 stable own attributes and descendant captions. Replay verifies fresh source and
 live safety; legacy records without identity fail rather than using coordinates.
+Actions also contain requiredInputs: stable locator/ordinal IDs of inputs filled
+during baseline discovery. Credentials are not stored in this prerequisite list.
+Regenerate older graphs to obtain explicit input prerequisites.
+Input results include inputId; blockers include requiredForReplay for secure/secret
+refusals. Trace missingRequiredInputs identifies unmet baseline prerequisites.
+Unruled plain inputs stay empty and recorded without stopping unrelated actions.
 Input results store label/source or label/reason, not intended input values, but
 known sensitive values in labels/errors are sanitized before persistence.
 
@@ -122,7 +128,9 @@ Validation contains valid/errors/warnings, sameHardwareModel,
 sameAppVersionAndBuild, environmentDifferences, baselineOsIdentity,
 candidateOsIdentity and postRunIdentityVerified after the post-run gate. OS
 identity arrays contain release/API/patch/build ID/incremental, excluding Android
-hardware fingerprint portions. Unknown components
+hardware fingerprint portions. osDifferenceFields and osDifferenceEvidence show
+which fields qualify: release/API/patch for differing or unverified models, with
+build ID/incremental added only for verified matching hardware. Unknown components
 are empty strings. Missingness must not be interpreted as a verified OS difference.
 
 ## Comparison, scoring, and final summary
@@ -135,7 +143,9 @@ Compared pairs add hierarchyValid and relative baseline/candidate/diff image pat
 
 visual contains changedPixelRatio, meanDifference, dimensionChanged,
 baselineSize, candidateSize. Hierarchy differences use multiset signatures;
-default signatures include Android text and iOS value. Behavior includes
+default signatures include Android text and iOS value. Freshness age/clock/date
+values use the narrow default normalization policy; meaningful general numbers
+and dates remain compared. Raw sanitized XML is retained. Behavior includes
 assertion_regression, action_failure, duration_regression, and evidence errors.
 
 Score is the maximum matching risk, not a sum. Critical >=90, High >=70,
@@ -152,5 +162,5 @@ An empty results list produces a synthetic INVALID row. Assertion results must
 be boolean; action timings must be numeric, finite, and nonnegative.
 
 CLI exits use invalid/highRisk counts (0/2/3), exceptions use 1, cancellation 130.
-Auto-run additionally checks partial coverage. A report or exit zero alone does
+Auto-run additionally checks partial coverage. A report or exit zero alone does not
 prove actual physical-device validation or remove hardware/content confounders.

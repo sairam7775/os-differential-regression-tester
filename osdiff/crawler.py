@@ -669,7 +669,11 @@ def _prepare_path(driver, runtime, platform, cfg):
 
 
 def replay_path(server_url, runtime, platform, path_actions, cfg, driver=None):
-    """Replay with caller-owned sessions; preserve actual reset evidence even on action failure."""
+    """Replay with caller-owned sessions and preserve reset evidence after action failure.
+
+    Unruled plain fields remain empty/recorded; refused secrets and missing inputs
+    filled during baseline discovery fail prerequisites. Successful blockers still
+    contribute to partial coverage."""
     owns_driver = driver is None
     trace, deterministic = [], None
     cfg = dict(cfg, sensitiveDeviceIds=[*cfg.get("sensitiveDeviceIds", []), runtime.get("udid")])

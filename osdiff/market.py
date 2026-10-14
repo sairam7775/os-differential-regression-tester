@@ -3,7 +3,8 @@
 Android origin uses package-manager metadata; iOS origin is operator attestation.
 Exact marketing version and build must match before crawling. Market runtimes
 omit the Appium app capability so the normal path preserves the installed binary.
-Missing OS evidence and post-run app revalidation remain stabilization work.
+Unknown OS values fail closed; build differences qualify only on verified matching
+hardware. Market capture is followed by app/OS/target identity revalidation.
 """
 
 from __future__ import annotations
@@ -341,8 +342,9 @@ def _environment_differences(baseline, candidate):
 def validate_market_pair(baseline, candidate, require_same_model=False, require_matching_environment=True):
     """Require distinct physical targets, identical app ID/version/build, and verified OS difference.
     
-    Only known common OS components can establish a difference. Hardware portions
-    of Android fingerprints are excluded. Model/environment policy remains configurable."""
+    Known release/API/patch differences qualify across hardware. Build IDs and
+    incrementals require verified matching manufacturer/model. Qualifying fields
+    and evidence are returned explicitly; unknown values never create a difference."""
     errors, warnings = [], []
     if not baseline.get("deviceId") or not candidate.get("deviceId"):
         errors.append("device_identity_unavailable")

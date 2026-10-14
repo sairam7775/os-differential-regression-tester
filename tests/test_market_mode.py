@@ -1,8 +1,8 @@
 """Synthetic provenance and market-runtime checks, not device validation.
 
-The iOS metadata test supplies a partial Appium mock and currently depends on
-runner/options being importable through other test setup. Run this module alone
-as well as in discovery when stabilizing the mocks; see tests/README.md.
+The iOS metadata test mocks only physical enumeration and session creation.
+Installed SDK modules remain real; run independently and through discovery.
+See tests/README.md for current results and device-validation limitations.
 """
 
 from pathlib import Path

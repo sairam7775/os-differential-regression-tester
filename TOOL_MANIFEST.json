@@ -31,7 +31,7 @@
     "reviewFixes": "docs/REVIEW_FIXES.md"
   },
   "validation": {
-    "status": "stabilization_ci_passed_device_validation_pending",
+    "status": "claude_rereview_fixes_ci_passed_device_validation_pending",
     "featureFlagsAreValidationEvidence": false,
     "baselineTestMethodsInSource": 38,
     "baselinePassingMethods": 14,
@@ -42,22 +42,24 @@
     "completedClaudeReviewReceived": true,
     "details": "Baseline fields preserve historical evidence. Fixes passed real-dependency CI; local Pillow unavailable. No devices or live Appium tested. See docs/REVIEW_FIXES.md.",
     "stabilizationClaudeApprovalReceived": false,
-    "testMethodsInSource": 104,
-    "ciBehaviorCommit": "b77baf10102f30f3db53ded17978264be846d5b6",
-    "ciRunUrl": "https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38554498609",
+    "testMethodsInSource": 126,
+    "ciBehaviorCommit": "25cdb05f22aa479a4c8c33094ebc94b6c4ade112",
+    "ciRunUrl": "https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38563111100",
     "ciMatrix": [
       "ubuntu/python3.11",
       "ubuntu/python3.14",
       "windows/python3.11",
       "windows/python3.14"
     ],
-    "ciTestsRunPerJob": 104,
-    "ciPassingMethodsPerJob": 103,
+    "ciTestsRunPerJob": 126,
+    "ciPassingMethodsPerJob": 125,
     "ciPlatformSkipsPerJob": 1,
     "ciErrorsPerJob": 0,
     "ciFailuresPerJob": 0,
-    "localPassingMethods": 60,
+    "localPassingMethods": 78,
     "localDiscoveryErrors": 3,
-    "localFullSuitePassed": false
+    "localFullSuitePassed": false,
+    "completedStabilizationClaudeReviewReceived": true,
+    "claudeReviewedCommit": "a85fb293f1e8890678bd40f7080afebc2e0f1fcd"
   }
 }
