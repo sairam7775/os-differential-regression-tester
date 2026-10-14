@@ -35,9 +35,11 @@ run `python osdiff.py ...`; internal imports use the package directory.
   app binary and use `preinstalled=True`, `noReset=True`.
 - `replay_path` returns `(driver_or_none, trace, error_or_none, deterministic)`.
   Supplied sessions are caller-owned; a created session is closed on failure
-  and transferred on success. Creation itself is outside its replay exception handler.
+  and transferred on success. Creation/reset/action failures are handled in replay.
+  deterministic is true/false/null; null means reset evidence is unavailable.
 - `discover_actions` returns `(actions, blocked_reasons, input_fields)`. Its
-  locator/ordinal representation is known to need safe live-target validation.
+  actions store native identities and separate ordinals per full locator match set.
+  Each automatic interaction refreshes hierarchy and validates the live control.
 - `crawl_baseline` returns/persists a discovery graph. Candidate replay uses
   its screen paths and checkpoint names, then returns capture/failure/reset counts.
 - `compare_platform` returns scored result rows. `write_report` combines these
@@ -49,15 +51,14 @@ See [configuration](CONFIGURATION.md) and [artifact contracts](ARTIFACTS.md).
 
 ## Work safely on the baseline
 
-Read the assessment before implementing fixes. Start with safe action resolution,
-Windows lock lifecycle, redaction, then false-PASS/coverage/provenance validation.
+Read REVIEW_FIXES.md for completed stabilization and current validation limits;
+the assessment preserves the original triggers and results.
 Add a focused regression test for each confirmed bug. Avoid rewriting working
 market capability construction, explicit device targeting, BFS orchestration,
 existing report escaping, or version/build matching without a concrete reason.
 
-Documentation currently marks unresolved defects directly in source docstrings.
-Update those notes when a fix is implemented and verified; do not treat a comment
-as a fix. Keep any functional fix in a separate logical commit from explanatory edits.
+Comments describe current contracts and remaining limitations. Update them after
+verified fixes; keep functional changes separate from explanatory-only edits.
 
 ## Testing and evidence
 
@@ -68,17 +69,18 @@ as a fix. Keep any functional fix in a separate logical commit from explanatory 
 ```
 
 Use `./.venv/bin/python` for the same commands on POSIX. Install `requirements.txt`
-first; dependencies are not currently optional for all test/CLI paths.
+first for execution/full tests. Help and prerequisite paths defer optional imports.
+Current suite and CI evidence are in REVIEW_FIXES.md; the results below are historical.
 The original attempt had 14 passing methods and three error entries, not a green
 38-method suite. Compilation and isolated synthetic probes are separate evidence.
 
 The tests use temporary artifacts/mocks and do not validate physical devices,
 signing, real Appium transport, printer safety, or simulator runtime behavior.
-Global Appium/Selenium stubs currently create import-order coupling; run modules
-individually while stabilizing them. An imported fake options class does not
-verify serialization by the real installed client.
+Global Appium/Selenium stubs have been removed. CI runs every module independently
+and verifies capability serialization using the real installed client. Scoped
+driver/process mocks still do not validate live transport or devices.
 
-The documentation update verified unchanged executable ASTs in all 11 Python
+The earlier documentation-only update verified unchanged executable ASTs in all 11 Python
 files, added 135 top-level function contract docstrings, preserved runtime
 configuration/scenario steps/dependency pins, parsed all four JSON data files,
 checked local Markdown links, compiled Python, and parsed both PowerShell scripts.
@@ -93,15 +95,15 @@ do not establish full runtime safety. Record failures and unavailable tooling ho
 ## Review handoff
 
 [PR #1](https://github.com/sairam7775/os-differential-regression-tester/pull/1)
-is a retrospective full-code review. Its base branch holds the pre-import commit;
-its head holds the reviewed code/documentation. It does not target `main`, which
-already contains the import. Merging it is not a rollout of fixes to `main`.
+is the completed Claude baseline audit against the pre-import branch. Its head
+contains historical code, so merging that audit is not a rollout of these fixes.
 
-A separate local Claude read-only command was launched with the PR instructions.
-No completed result has been received. Creating a GitHub PR alone does not deliver
-input to an already-running Claude conversation. Reviewers should use the current
-PR head and exact line references, independently verify assessment findings, and
-return severity, trigger, impact, and proposed regression tests.
+[PR #2](https://github.com/sairam7775/os-differential-regression-tester/pull/2)
+targets main with stabilization commits. [REVIEW_FIXES.md](REVIEW_FIXES.md) maps
+findings to code/tests and documents deliberate safety compatibility changes.
+Reviewers should inspect the exact current head and report severity, trigger,
+impact, and regression evidence. The follow-up diff has not yet been approved by
+Claude. A GitHub comment does not prove delivery to an already-running local session.
 
 ## Real-device acceptance after stabilization
 

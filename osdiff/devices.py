@@ -76,7 +76,7 @@ def emulator_path():
 
 
 def adb_path():
-    """Find SDK platform-tools ADB or PATH; market helpers do not yet share this lookup."""
+    """Find ADB in SDK platform-tools or PATH for virtual and physical probes."""
     root = android_sdk_root()
     exe = "adb.exe" if platform.system() == "Windows" else "adb"
     if root and (Path(root) / "platform-tools" / exe).exists():

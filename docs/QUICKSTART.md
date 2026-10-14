@@ -1,7 +1,7 @@
 # Local quick start — v0.5.0
 
-Read the [baseline assessment](BASELINE_ASSESSMENT.md) first: shared locator
-resolution, Windows locking, redaction, and validity defects remain unresolved.
+Read [review fixes and validation limits](REVIEW_FIXES.md) first. The historical
+[baseline assessment](BASELINE_ASSESSMENT.md) records the imported defects.
 The following describes setup and command shapes; it is not device test evidence.
 
 ## 1. Install prerequisites
@@ -104,6 +104,6 @@ and install the supplied binary. Do not use it for physical market testing.
 
 Inspect report status, provenance, coverage blockers, reset evidence, and actual
 failures together. Partial coverage is INVALID, not a compatibility PASS.
-Exit zero means no reported High/Critical regression; unresolved baseline gaps
-still prevent relying on that alone. [Artifact documentation](ARTIFACTS.md)
+Exit zero means no reported High/Critical regression; inspect explored scope,
+confounders, and actual device acceptance before sign-off. [Artifact documentation](ARTIFACTS.md)
 explains output fields and [tests README](../tests/README.md) explains test scope.

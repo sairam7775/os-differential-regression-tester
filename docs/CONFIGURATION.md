@@ -35,8 +35,8 @@ overrides the iOS simulator profile. Run mode uses config plus explicit scenario
 
 Values are loosely validated dictionaries. Choose positive limits, non-negative
 seconds, 0..1 comparison fractions, valid regexes, and trusted path/identifier strings;
-the baseline does not fully enforce those constraints. Unknown input is not proof
-of a valid comparison. See BASELINE_ASSESSMENT.md for concrete gaps.
+unknown input is not proof of a valid comparison. See REVIEW_FIXES.md for current
+validation and remaining limits; BASELINE_ASSESSMENT.md describes historical defects.
 
 ## Shipped fields and defaults
 
@@ -47,7 +47,7 @@ of a valid comparison. See BASELINE_ASSESSMENT.md for concrete gaps.
 | `appium.startupTimeoutSeconds` | `30` | Seconds allowed for owned server startup; independent of device boot, reset, and element timeouts. |
 | `appium.logLevel` | `"error"` | Appium server verbosity; higher levels can increase sensitive log exposure. |
 | `appium.saveServerLog` | `false` | Retain owned server log after attempted literal redaction when true; default false removes it on normal cleanup. |
-| `appium.sensitiveEnvNames` | `["TEST_USER_EMAIL", "TEST_USER_PASSWORD"]` | Environment-variable names whose nonempty values are collected for some log/hierarchy redaction. Other artifact channels are not fully covered. |
+| `appium.sensitiveEnvNames` | `["TEST_USER_EMAIL", "TEST_USER_PASSWORD"]` | Environment-variable names whose values are redacted from logs, hierarchy, and nested artifact strings. Input-rule and scenario values are also collected. |
 | `android.enabled` | `true` | Include Android in virtual run/auto-run and doctor selection; market-run uses its explicit platform argument. |
 | `android.appPath` | `"../apps/app-debug.apk"` | Virtual APK path, resolved relative to this config directory. ../apps points to the tool-root apps directory. Not used as a market binary. |
 | `android.appPackage` | `"com.example.mobile"` | Virtual target package ID; override/inference behavior differs when auto-run --app is supplied. |
@@ -83,24 +83,24 @@ of a valid comparison. See BASELINE_ASSESSMENT.md for concrete gaps.
 | `comparison.durationRegressionFactor` | `1.75` | Candidate duration multiplier relative to a positive baseline; extra-seconds threshold must also pass. |
 | `comparison.minimumDurationRegressionSeconds` | `1.0` | Minimum absolute candidate-minus-baseline seconds, used with the duration factor. |
 | `comparison.hierarchyChangeWarningRatio` | `0.15` | Multiset hierarchy difference fraction triggering REVIEW; not a semantic missing-control guarantee. |
-| `comparison.hierarchyAttributes` | `["type", "class", "name", "label", "resource-id", "content-desc", "enabled", "clickable"]` | Attributes used for hierarchy signatures. Shipped defaults omit Android text and iOS value; this known gap can miss text-only changes. |
+| `comparison.hierarchyAttributes` | `["type", "class", "name", "label", "resource-id", "content-desc", "enabled", "clickable", "text", "value"]` | Attributes used for nonempty hierarchy signatures; text/value changes are included. |
 | `comparison.hierarchyIgnoreValuePatterns` | `[]` | Case-sensitive Python regex replacements for dynamic hierarchy values before comparison. |
 | `comparison.ignoreRegions` | see shipped JSON | Per-platform comparison masks. These do not redact stored screenshots or report originals. |
-| `crawler.safeMode` | `true` | Apply deny keyword filtering during discovery. Shared-locator targeting is a confirmed unresolved defect; true is not a safety certification. |
+| `crawler.safeMode` | `true` | Apply mandatory plus configured deny rules to descendant captions and live controls. Keep enabled for market testing; synthetic checks are not physical safety certification. |
 | `crawler.maxScreens` | `120` | Baseline unique-state limit; reaching configured thresholds conservatively makes coverage partial. |
 | `crawler.maxDepth` | `12` | Maximum action-path depth from reset launch; action-bearing frontier at this depth makes coverage partial. |
 | `crawler.maxActionsPerScreen` | `24` | Cap retained actions after sorting; excess actions are recorded as truncation blockers. |
 | `crawler.maxTotalPaths` | `800` | Limit attempted baseline paths, including duplicates and failures. |
 | `crawler.enableScrolling` | `true` | Queue one whole-window downward swipe when native scrollable content is recognized; no container/back/upward traversal proof. |
-| `crawler.settleSeconds` | `0.6` | Fixed waits around launch/action/capture; included in current wall-clock action measurements. |
+| `crawler.settleSeconds` | `0.6` | Fixed waits around launch/action/capture; included in monotonic action-duration measurements. |
 | `crawler.afterInputSettleSeconds` | `0.3` | Pause after filling inputs before refreshing source for discovered/candidate checkpoint capture. |
-| `crawler.denyKeywords` | array (21 entries); see shipped JSON | Case-insensitive Python regexes checked against selected labels/locator values; deny takes precedence over allow metadata. |
+| `crawler.denyKeywords` | array (28 entries); see shipped JSON | Case-insensitive patterns added to the mandatory deny floor; checked against control/descendant captions and live metadata after case/token normalization. |
 | `crawler.allowKeywords` | `["\\ballow\\b", "\\bwhile using\\b", "\\bok\\b", "\\bcontinue\\b", "\\bnext\\b", "\\bcancel\\b", "\\bnot now\\b"]` | Retained compatibility metadata; currently does not whitelist actions or override denies. |
 | `crawler.autoInputRules` | array (2 entries); see shipped JSON | Ordered pattern/env or pattern/value dictionaries; first matching rule supplies input. Prefer environment references and dedicated data. |
 | `crawler.fingerprintAttributes` | `["type", "class", "name", "label", "value", "text", "resource-id", "content-desc", "enabled", "clickable", "scrollable"]` | Tree attributes used to discover distinct states; text/value are included by default. |
 | `crawler.fingerprintIgnorePatterns` | `["\\b\\d{1,2}:\\d{2}\\b", "\\b\\d{4}-\\d{2}-\\d{2}\\b"]` | Case-sensitive Python regexes replaced with a dynamic marker before fingerprinting; overbroad rules can merge distinct states. |
 | `crawler.resetTimeoutSeconds` | `45` | Seconds allowed for each reset subprocess/hook; not a complete crawl/session timeout. |
-| `crawler.allowedSystemPackages` | see shipped JSON | Per-platform additions to built-in allowed system surfaces. Empty arrays do not remove built-in allowances. |
+| `crawler.allowedSystemPackages` | see shipped JSON | Compatibility metadata limited to recognized permission controllers/SpringBoard alerts; arbitrary additions cannot widen the boundary. Settings/installers are always rejected. |
 | `marketMode.androidAllowedInstallers` | `["com.android.vending"]` | Installer metadata packages accepted for Android origin policy; CLI --allow-android-installer replaces this list when supplied. |
 | `marketMode.requireSameHardwareModel` | `false` | Require verified same model when true; false allows model differences with warnings and possible hardware confounding. |
 | `marketMode.iosRequireAppStoreAttestation` | `true` | Enable early iOS CLI attestation requirement. Disabling this does not bypass later marketOriginVerified validation. |
@@ -134,8 +134,11 @@ regions default empty; configure them using known test UI geometry.
 
 Each autoInputRules item uses `pattern` (case-insensitive regex) and `env` (variable
 name) or `value` (inline fallback). Pattern matching uses the selected field label.
-The first match wins. A missing/empty value creates a blocker. Duplicate controls,
-failed clears, encoded secrets, and inline-value redaction need stabilization.
+The first match wins. Missing/empty values and failed clear operations create
+blockers. secret=true (or secure=true) requires native password/secure-text-field
+evidence; password/PIN/token/secret-named environment rules require it too. The
+shipped password rule uses word boundaries, so shipping/shopping/typing are not
+password fields. Values are sanitized in artifacts; no secret is sent to a plain field.
 
 ## Reset policy
 
@@ -147,19 +150,19 @@ failed clears, encoded secrets, and inline-value redaction need stabilization.
 | relaunch | Terminate/activate only; non-deterministic | Real iOS fallback with honest partial coverage |
 | driver | No deterministic reused-session reset proof | Compatibility path; do not claim branched complete coverage |
 
-Normal market runtime prevents binary supply; helpers still need explicit mode
-authorization. Android clear does not reset external hardware/server state.
+Market options reject binary supply, and simulator reinstall rejects preinstalled
+runtimes directly. Android clear does not reset external hardware/server state.
 Real-iOS command placeholders `{udid}` and `{appId}` are expanded with str.format;
 there is no shell evaluation or bundled reset tool. See REAL_DEVICE_MARKET_MODE.md.
 
 ## Evidence and privacy
 
 Feature flags and notes do not establish tested behavior. Primary provenance IDs
-are masked/hashed; errors/trace/assertion metadata is not yet fully sanitized.
-Literal hierarchy redaction can corrupt XML. POSIX permissions are best-effort,
+are masked/hashed; known values in errors/traces/assertions are sanitized.
+Decoded XML redaction preserves syntax and encoded values. POSIX permissions are best-effort,
 privatePermissions is not a runtime toggle, and Windows ACLs are unchanged.
 Retained screenshots may contain unmasked personal information. Use dedicated
 non-personal data and preserve the handoff safety/validity constraints.
 
 See ARTIFACTS.md for output fields, SCENARIOS.md for scenario data, and
-BASELINE_ASSESSMENT.md for actual validation results and unfinished fixes.
+REVIEW_FIXES.md for actual validation results and remaining work.

@@ -1,11 +1,9 @@
-"""Discover baseline UI states and replay their navigation paths on a candidate.
+"""Discover baseline UI states and replay retained paths on a candidate.
 
-Each queued path starts with the configured app-state reset. One Appium session
-is reused per phase and discarded after a replay error. Actions store locator
-candidates, ordinals, and bounds; these are not proof of safe live targeting.
-The imported baseline has unresolved locator/safety and reset-evidence gaps.
-See docs/AUTO_DISCOVERY.md and docs/BASELINE_ASSESSMENT.md before changing it.
-"""
+Each branch starts with its configured reset. Actions retain native identities
+and per-locator occurrences; live attributes and descendant safety are verified
+before interaction. Both targets contribute reset, input, and coverage evidence.
+See docs/AUTO_DISCOVERY.md for remaining graph and scrolling limitations."""
 
 from __future__ import annotations
 
@@ -304,10 +302,10 @@ def _normalize_for_fingerprint(source, cfg):
 
 
 def state_fingerprint(source, cfg, context=None):
-    """Hash normalized UI plus supplied foreground context into a 16-character state key.
+    """Hash normalized hierarchy and stable package/activity/bundle context.
     
-    Transient iOS pid is currently included by callers, so relaunches can generate
-    new keys for the same screen. This is a discovery identity, not a safety proof."""
+    Transient process IDs are excluded. This identifies discovery states rather than
+    proving that a candidate destination is semantically equivalent."""
     normalized = _normalize_for_fingerprint(source, cfg)
     context = {k: v for k, v in (context or {}).items() if k in {"package", "activity", "bundleId"}}
     if context:
@@ -378,10 +376,10 @@ def _find_elements(driver, locator):
 
 
 def _find_for_action(driver, action):
-    """Try locator candidates using one stored ordinal across their full live match sets.
+    """Try locators using each locator's occurrence in its full native match set.
     
-    Missing occurrences return None. Filtered-vs-live ordinals and fallback match-set
-    differences remain a confirmed safe-mode targeting defect."""
+    Filtering never renumbers occurrences. A returned element still needs fresh
+    identity and safety validation before interaction."""
     for locator in action.get("locators", []):
         ordinal = int(locator.get("ordinal", action.get("ordinal", 0)))
         if ordinal < 0:
@@ -479,15 +477,15 @@ def _sensitive_values(cfg):
 
 
 def _redact_source(source, cfg):
-    """Apply literal hierarchy redaction; the current replacement can make XML invalid."""
+    """Redact decoded XML values and serialize without repairing malformed captures."""
     return redact_xml(source, _sensitive_values(cfg))
 
 
 def _save_checkpoint(driver, platform, checkpoint, state_id, path_actions, out_root, cfg, metadata=None, recent_actions=None):
-    """Persist a screenshot, source.xml, and state.json under auto_crawl/checkpoint.
+    """Capture a verified screenshot and sanitized hierarchy/state evidence.
     
-    Screenshot masks are storage privacy masks. Source redaction currently breaks XML
-    attributes; path/trace/metadata fields require additional secret sanitization."""
+    Storage masks run before report copies. A failed or missing screenshot raises;
+    known input values and target identifiers are removed from XML and JSON strings."""
     folder = private_dir(Path(out_root) / "auto_crawl" / checkpoint)
     screenshot = folder / "screen.png"
     if driver.save_screenshot(str(screenshot)) is False or not screenshot.is_file():
@@ -692,11 +690,10 @@ def _close_driver(driver):
 
 
 def crawl_baseline(server_url, runtime, platform, out_root, cfg):
-    """Breadth-first traversal of reset-to-launch action paths with checkpoint/graph persistence.
+    """Explore reset-based BFS paths and retain one checkpoint per normalized state.
     
-    First-seen fingerprints keep one representative path. Blocked/failed/truncated
-    branches and exhausted limits force PARTIAL; intermediate input and stable-state
-    checks still have gaps. Edges currently lack resolved destination state IDs."""
+    Creation/replay/capture failures are recorded as incomplete coverage. The graph
+    still stores queued source edges without reliable resolved destination IDs."""
     cfg = dict(cfg, sensitiveDeviceIds=[*cfg.get("sensitiveDeviceIds", []), runtime.get("udid")])
     max_screens = int(cfg.get("maxScreens", 120))
     max_depth = int(cfg.get("maxDepth", 12))
@@ -822,11 +819,10 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
 
 
 def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_root, cfg):
-    """Replay baseline screen paths and capture candidate artifacts under baseline checkpoint names.
+    """Replay baseline paths and capture candidate artifacts under baseline names.
     
-    reproducedScreens counts captures, not confirmed equivalent destinations. Failed
-    paths are retained separately; the returned reset flag is not fully propagated
-    by coverage_summary in this baseline."""
+    Reproduced counts captures, not confirmed destination equivalence. Failures and
+    blocked inputs are retained; coverage combines reset evidence from both devices."""
     cfg = dict(cfg, sensitiveDeviceIds=[*cfg.get("sensitiveDeviceIds", []), runtime.get("udid")])
     reproduced, failures = 0, []
     blocked_all = []

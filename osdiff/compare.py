@@ -1,10 +1,8 @@
-"""Compare persisted checkpoints and render a local HTML/JSON report.
+"""Validate persisted execution/checkpoint evidence and render HTML/JSON reports.
 
-Inputs are per-device run summaries plus screenshot, hierarchy, and state files.
-INVALID means comparison evidence is insufficient; FAIL means a scored candidate
-regression. Current artifact-loading and baseline-assertion gaps are documented
-in docs/BASELINE_ASSESSMENT.md. See docs/ARTIFACTS.md for persisted field meanings.
-"""
+Malformed, absent, or invalid baseline artifacts produce INVALID. Candidate
+regressions produce FAIL/REVIEW; incomplete automatic coverage overrides PASS.
+See docs/ARTIFACTS.md for schemas, precedence, and measurement limitations."""
 
 from __future__ import annotations
 
@@ -72,10 +70,10 @@ def _signature_counts(path, cfg):
 
 
 def hierarchy_result(a, b, cfg):
-    """Return hierarchy validity and a multiset Jaccard difference ratio in the range 0..1.
+    """Validate nonempty native signatures and return multiset Jaccard difference.
     
-    Default signatures omit Android text and iOS value. Two empty signatures count
-    as identical; these limitations must not be confused with meaningful UI equality."""
+    Default signatures include Android text and iOS value. Configured dynamic-value
+    patterns can normalize known noise; empty signatures are invalid evidence."""
     aa, error_a = _signature_counts(a, cfg)
     bb, error_b = _signature_counts(b, cfg)
     if error_a or error_b:
@@ -179,10 +177,10 @@ def visual(base, cand, diff_out, cfg, platform):
 
 
 def _behavior(baseline_state, candidate_state, cfg):
-    """Compare baseline-passed assertions and common-prefix action status/timing.
+    """Compare assertions and action status/timing; detect missing candidate actions.
     
-    Failed baseline assertions and absent trailing candidate actions are not yet
-    invalidated. Action indices are compared without verifying their identity."""
+    Failed baseline evidence invalidates comparison. Action indices remain the
+    alignment key; semantic destination equivalence is future work."""
     out = []
     baseline_assertions = baseline_state.get("assertions", [])
     candidate_assertions = candidate_state.get("assertions", [])
@@ -274,10 +272,10 @@ def _summary_map(path):
 
 
 def _execution_results(results_root, platform):
-    """Create execution-level INVALID/FAIL rows from run summaries.
+    """Create execution INVALID/FAIL rows from validated nonempty run summaries.
     
     A baseline failure invalidates the experiment; candidate failure is a regression.
-    Malformed or empty summaries currently need additional fail-closed validation."""
+    Malformed, missing, duplicate, or incomplete summary records are invalid evidence."""
     base_path = Path(results_root) / platform / "baseline" / "run-summary.json"
     cand_path = Path(results_root) / platform / "candidate" / "run-summary.json"
     baseline, candidate = {}, {}
@@ -478,10 +476,10 @@ def _severity(score):
 
 
 def compare_platform(results_root, platform, cfg, report_root):
-    """Join checkpoint artifacts, copy report images, and score each result plus execution rows.
+    """Validate paired artifacts and score checkpoint plus execution results.
     
-    Missing evidence and candidate regression are different concepts. Capture/file
-    errors may still escape before a final report; see the baseline assessment."""
+    Bad JSON/XML/images become INVALID rows rather than successful empty defaults.
+    Assertion results must be boolean and timings finite, numeric, and nonnegative."""
     baseline = _discover(Path(results_root) / platform / "baseline")
     candidate = _discover(Path(results_root) / platform / "candidate")
     assets = private_dir(Path(report_root) / "assets" / platform)
@@ -602,11 +600,10 @@ def _e(value):
 
 
 def write_report(report_root, results, project_name="Mobile App", coverage=None, provenance=None):
-    """Write HTML, comparison.json, and summary.json with authoritative overall status.
+    """Write reports with precedence INVALID, FAIL, REVIEW, PASS.
     
-    INVALID outranks FAIL, then REVIEW, then PASS. Supplied incomplete coverage or
-    invalid provenance overrides scores; an empty results list alone is not validated.
-    The current checkpoint count also includes invalid non-synthetic rows."""
+    Incomplete coverage, invalid provenance, and empty result sets force INVALID.
+    The checkpoints count excludes synthetic and invalid rows."""
     report_root = private_dir(report_root)
     if not results:
         results = [{"platform": "unknown", "scenario": "__run__", "checkpoint": "__no_results__", "comparisonStatus": "INVALID", "riskScore": 100, "severity": "Invalid", "reasons": ["no_comparison_results"], "behaviorRegressions": [], "visual": {}, "hierarchyChangeRatio": 0.0}]

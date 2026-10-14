@@ -37,7 +37,7 @@ def _run(cmd, timeout=30, check=True):
 
 
 def _adb(serial, *args, timeout=30, check=True):
-    """Target exactly one serial for each ADB probe; ADB currently resolves through PATH only."""
+    """Target exactly one serial using the shared SDK-root/PATH ADB lookup."""
     adb = adb_path() or "adb"
     return _run([adb, "-s", serial, *args], timeout=timeout, check=check)
 
@@ -230,10 +230,10 @@ def _new_probe_session(server_url, runtime):
 
 
 def probe_ios_market_device(server_url, udid, bundle_id, app_store_confirmed=False):
-    """Use a temporary XCUITest session to inspect one preinstalled physical-device app.
+    """Probe an Xcode-listed physical iOS target and its preinstalled app metadata.
     
-    The session is always quit after successful creation. Store origin is operator
-    attestation; absent simulator metadata currently does not prove physical identity."""
+    App Store origin remains operator attestation. A temporary XCUITest session is
+    always closed; missing physical enumeration fails rather than assuming hardware."""
     if platform.system() != "Darwin":
         raise RuntimeError("iOS real-device market testing requires macOS with Xcode.")
     if udid not in _physical_ios_device_ids():
@@ -339,11 +339,10 @@ def _environment_differences(baseline, candidate):
 
 
 def validate_market_pair(baseline, candidate, require_same_model=False, require_matching_environment=True):
-    """Return gate validity, error labels, warnings, and app/model/environment comparison evidence.
+    """Require distinct physical targets, identical app ID/version/build, and verified OS difference.
     
-    Version and build matching is mandatory. Model/environment policies can be
-    configured; missing OS fields currently can create a false difference, and
-    physicalDevice is assumed from the probe rather than rechecked here."""
+    Only known common OS components can establish a difference. Hardware portions
+    of Android fingerprints are excluded. Model/environment policy remains configurable."""
     errors, warnings = [], []
     if not baseline.get("deviceId") or not candidate.get("deviceId"):
         errors.append("device_identity_unavailable")

@@ -27,10 +27,11 @@
     "artifacts": "docs/ARTIFACTS.md",
     "baselineAssessment": "docs/BASELINE_ASSESSMENT.md",
     "agentInstructions": "AGENTS.md",
-    "claudeInstructions": "CLAUDE.md"
+    "claudeInstructions": "CLAUDE.md",
+    "reviewFixes": "docs/REVIEW_FIXES.md"
   },
   "validation": {
-    "status": "baseline_requires_stabilization",
+    "status": "stabilization_ci_passed_device_validation_pending",
     "featureFlagsAreValidationEvidence": false,
     "baselineTestMethodsInSource": 38,
     "baselinePassingMethods": 14,
@@ -38,7 +39,25 @@
     "baselineDiscoveryErrors": 2,
     "physicalDeviceValidationPerformed": false,
     "liveAppiumValidationPerformed": false,
-    "completedClaudeReviewReceived": false,
-    "details": "Historical baseline evidence; see docs/BASELINE_ASSESSMENT.md. Documentation changes are not functional fixes."
+    "completedClaudeReviewReceived": true,
+    "details": "Baseline fields preserve historical evidence. Fixes passed real-dependency CI; local Pillow unavailable. No devices or live Appium tested. See docs/REVIEW_FIXES.md.",
+    "stabilizationClaudeApprovalReceived": false,
+    "testMethodsInSource": 103,
+    "ciBehaviorCommit": "45bc9662610284d1eeafa924188d9ace5fa75691",
+    "ciRunUrl": "https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38552550322",
+    "ciMatrix": [
+      "ubuntu/python3.11",
+      "ubuntu/python3.14",
+      "windows/python3.11",
+      "windows/python3.14"
+    ],
+    "ciTestsRunPerJob": 103,
+    "ciPassingMethodsPerJob": 102,
+    "ciPlatformSkipsPerJob": 1,
+    "ciErrorsPerJob": 0,
+    "ciFailuresPerJob": 0,
+    "localPassingMethods": 59,
+    "localDiscoveryErrors": 3,
+    "localFullSuitePassed": false
   }
 }

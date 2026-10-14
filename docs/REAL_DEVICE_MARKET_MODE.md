@@ -13,21 +13,23 @@ Never add sideloading, upgrade/downgrade, reinstall, or OS modification to this 
 Android probes authorization, emulator indicators, installation, package
 versionCode/versionName, installer-source metadata, launch activity, manufacturer,
 model, OS release/API/patch/fingerprint, and comparable environment facts.
-Each probe targets the supplied serial. Current ADB lookup requires PATH even
-though other helpers support SDK-root lookup.
+Each probe targets the supplied serial and shares SDK-root/PATH ADB lookup.
+OS build ID/incremental are collected separately from hardware fingerprint portions.
 
 iOS uses a temporary XCUITest session for device metadata and `mobile: listApps`
 with `returnAttributes`. Version/build are machine-read; App Store origin is
 operator attestation with `--ios-app-store-confirmed`. The probe quits its session.
-Missing simulator metadata currently results in assumed physical-device status;
-do not describe that as positive hardware proof.
+The supplied UDID must appear in Xcode physical-device enumeration before opening
+the session; missing enumeration fails closed. This requires macOS/Xcode.
 
 `validate_market_pair` rejects equal device IDs, platform/app mismatch, unavailable
 or unequal app version/build, equal OS tuples, unverified origin, and policy
 violations. Same model is optional; comparable environment values are required
-to match by default. Unknown environment fields are skipped. Missing OS fields
-can currently create a false tuple difference; positive OS evidence and post-run
-app identity revalidation remain known work. See [assessment](BASELINE_ASSESSMENT.md).
+to match by default. Unknown environment fields are skipped. An OS difference
+requires unequal known common release/API/patch/build ID/incremental evidence.
+Hardware-only fingerprint differences and missing values cannot establish it.
+Both apps and target/OS identities are re-probed after capture; updates, changes,
+or unavailable post-run probes invalidate provenance.
 
 ## Reset strategy
 
@@ -38,8 +40,8 @@ app identity revalidation remain known work. See [assessment](BASELINE_ASSESSMEN
 | iOS with external hook | `reset_command` | Operator-defined data reset; trusted on exit zero |
 
 Relaunch-only branched baseline exploration is partial. App-data reset does not
-reset printer/Bluetooth/server/account state. Current coverage summary uses only
-baseline isolation; candidate reset evidence must be incorporated during stabilization.
+reset printer/Bluetooth/server/account state. Coverage incorporates both targets
+and remains partial for failed/missing paths or blocked candidate inputs.
 
 A hook is configured as an argument array, not shell text:
 
@@ -55,13 +57,15 @@ The executable must exist and must preserve the store binary. `{udid}` and
 
 Keep safe mode enabled for INSTAX and other companion apps. Pairing, connections,
 Bluetooth, printing/reprinting, firmware, payments, and destructive actions are
-intended deny targets. A confirmed filtered-ordinal/live-locator defect means
-keyword filtering alone is insufficient; fix resolution before hardware validation.
+mandatory deny targets. Descendant captions and native live identities are
+checked before taps. System Settings/installers stop paths; permission dialogs
+are narrowly recognized. These synthetic checks still require device acceptance.
 Use separately reviewed controlled scenarios for hardware operations, never an
 automatic safe-mode crawl. Explicit scenario mode has no crawler deny filter.
 
 Only the primary device ID in persisted provenance is masked/hashed. Raw installer
-output is dropped there; traces and errors still need sanitization. POSIX private
+output is dropped there; known credentials and target IDs in traces/errors are
+sanitized. Unknown personal content still requires dedicated data/storage masks. POSIX private
 permissions are best-effort, Windows ACLs are unchanged, and screenshot masks are
 opt-in. Keep artifacts private and use non-personal accounts/data.
 

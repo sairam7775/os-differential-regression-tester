@@ -4,6 +4,10 @@ Reviewed on 2026-10-14. Source baseline: commit
 `3e33cb26e2690305b2b6c4f6498fb0d93fedd65e` in
 `sairam7775/os-differential-regression-tester`.
 
+> Historical record of the imported baseline. Current stabilization changes and
+> actual follow-up results are in [REVIEW_FIXES.md](REVIEW_FIXES.md). Statements
+> below describing unresolved defects apply to that baseline commit.
+
 ## Import and validation evidence
 
 The supplied hardened ZIP contained 33 files, including VERSION `0.5.0`.

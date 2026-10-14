@@ -1,44 +1,41 @@
-# Automated test scope and baseline results
+# Automated test scope and actual results
 
-Install `requirements.txt` in the tool-local virtual environment, then run:
+Install requirements.txt in the project virtual environment, then run:
 
 ```bash
 python -m unittest discover -s tests -v
 python -m unittest discover -s tests -p test_market_mode.py -v
 python -m unittest discover -s tests -p test_hardening.py -v
 python -m unittest discover -s tests -p test_regressions.py -v
+python -m unittest discover -s tests -p test_review_fixes.py -v
+python -m unittest discover -s tests -p test_review_artifacts.py -v
 ```
 
-Use `.\.venv\Scripts\python.exe` on Windows or `./.venv/bin/python` on POSIX
-to avoid selecting the wrong interpreter. There are 38 test methods across
-three modules. Existing tests use synthetic hierarchy/images/JSON, temporary
-directories, and fake/mocked drivers/processes; they do not operate real devices.
+Use `.\.venv\Scripts\python.exe` on Windows or `./.venv/bin/python` on POSIX.
+There are 103 methods across five modules. Driver/process boundaries use scoped
+mocks, temporary synthetic artifacts, and real Pillow fixtures. Installed
+Appium/Selenium modules are never replaced by process-global stubs.
 
-| Module | Main coverage |
-| --- | --- |
-| `test_market_mode.py` | Version/build/origin/OS/model/environment gates, preinstalled runtimes, metadata parsing |
-| `test_hardening.py` | Deny precedence, truncation, fingerprints, missing ordinals, replay failures, reset, traces, XML/report validity, permissions, timeouts/lock helper |
-| `test_regressions.py` | Empty checkpoints, baseline/candidate execution failure, duplicate hierarchy nodes, HTML escaping, readiness order, path resolution |
+| Module | Methods | Main coverage |
+| --- | --- | --- |
+| test_market_mode.py | 15 | Exact build/origin/OS/model/environment gates, runtime and metadata |
+| test_hardening.py | 15 | Blockers/traces/reset, timing, report validity, privacy, subprocess/locks |
+| test_regressions.py | 8 | Empty checkpoints, failures, duplicate hierarchy, HTML/readiness/paths |
+| test_review_fixes.py | 44 | Live control/descendant/ordinal safety, foreground, input/privacy, OS/post-run gates, both-device coverage, locks and process lifecycle |
+| test_review_artifacts.py | 21 | Real image/JSON/XML invalidation, strict assertions/timing, scenario/privacy, logs and real SDK capabilities |
 
-The original Windows/Python 3.14.7 attempt returned exit 1: 14 passing methods,
-one test-method error, two module-discovery errors, and `Ran 17 tests`.
-Pillow (`PIL`) was missing for two modules; the iOS metadata test's partial
-Appium mock failed to supply options imports. Installation was attempted but
-unavailable in this environment. This is not a passing full-suite baseline.
+[CI at behavior commit 45bc966](https://github.com/sairam7775/os-differential-regression-tester/actions/runs/38552550322)
+ran 103 tests per job on Windows/Linux Python 3.11/3.14: 102 passed, one platform
+skip, zero failures/errors. CI also runs each module independently, compiles,
+and checks CLI argument/help paths. Windows skips POSIX permissions; Linux skips
+Windows process queries. Real capability tests execute with installed Appium.
+Consult PR #2 checks for the final documentation head.
 
-`test_hardening` installs global Appium/Selenium stubs if not already imported,
-even when real clients are installed. Other modules can depend on that import
-order. The optional runner test may run against stubbed classes; that is not
-real-client capability serialization coverage. Replace process-global fakes
-with scoped fixtures during stabilization and keep independent module runs.
+Restricted local Windows discovery loaded 62 entries: 59 passing methods, three
+discovery errors because Pillow was unavailable. This is not a local full-suite
+pass. The original import had 14 passes, one method error, and two discovery errors.
+[BASELINE_ASSESSMENT.md](../docs/BASELINE_ASSESSMENT.md) preserves that history.
 
-Known gaps include safe duplicate-control resolution, Windows process-safe lock
-ownership/cleanup, XML-preserving redaction, secret/ID leakage through all artifacts,
-malformed summaries/states, failed baseline assertions, trailing/missing actions,
-candidate reset/input evidence, positive OS identity, post-run build verification,
-and session/capture/setup cleanup. Add focused regressions when fixing these,
-without weakening market/safety/coverage invariants.
-
-See [baseline assessment](../docs/BASELINE_ASSESSMENT.md) for actual evidence and
-[developer guide](../docs/DEVELOPER_GUIDE.md) for compilation/AST/documentation
-checks. Passing synthetic tests cannot establish real-device or printer safety.
+No real device, emulator, simulator, signing, live Appium, or printer tests occurred.
+[REVIEW_FIXES.md](../docs/REVIEW_FIXES.md) maps comments to fixes and records
+remaining limitations and justified compatibility changes.

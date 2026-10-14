@@ -1,9 +1,8 @@
-"""Shared artifact writing, best-effort POSIX permissions, and screenshot masking.
+"""Write sanitized artifacts, apply best-effort POSIX permissions, and mask pixels.
 
-This is not a complete artifact privacy boundary: callers can persist sensitive
-metadata elsewhere, Windows ACLs are not configured, and literal XML redaction
-currently corrupts attribute syntax. See docs/BASELINE_ASSESSMENT.md.
-"""
+XML redaction preserves syntax; JSON redaction traverses nested strings. Callers
+must supply known sensitive values. Windows inherits existing ACLs, and screenshot
+privacy depends on configured storage masks and dedicated non-personal test data."""
 
 from __future__ import annotations
 
@@ -47,7 +46,7 @@ def write_text(path, text, *, encoding="utf-8"):
 
 
 def write_json(path, value, *, sensitive_values=None):
-    """Serialize indented JSON through write_text; callers must sanitize sensitive values first."""
+    """Sanitize supplied sensitive values recursively and serialize indented UTF-8 JSON."""
     return write_text(path, json.dumps(redact_data(value, sensitive_values), indent=2), encoding="utf-8")
 
 

@@ -1,10 +1,8 @@
-"""Execute explicit scenario steps and capture readiness-checked checkpoints.
+"""Execute explicit scenarios and capture readiness-checked checkpoints.
 
-A scenario owns its Appium session and always attempts quit after execution.
-Checkpoint artifacts feed osdiff.compare; a returned status alone is not proof
-that all assertions/actions succeeded. See docs/SCENARIOS.md for the JSON format
-and docs/BASELINE_ASSESSMENT.md for continued-action and assertion validity gaps.
-"""
+A scenario owns its Appium session and attempts quit in finally. Failed actions
+remain failed even with continueOnFailure; false assertions fail the scenario.
+Known environment/inline input values and target IDs are sanitized in artifacts."""
 
 from __future__ import annotations
 
@@ -47,10 +45,10 @@ def _find(driver, platform, locator, timeout=10):
 
 
 def _assertion(driver, platform, assertion):
-    """Evaluate a checkpoint assertion and return passed/message metadata without raising.
+    """Evaluate readiness and return passed/message metadata without raising.
     
-    Messages may contain actual/expected text and are not yet comprehensively
-    redacted; failed baseline assertions need stronger comparator invalidation."""
+    Messages may contain actual/expected text in memory. Checkpoint and summary
+    writers sanitize known sensitive values before persisting them."""
     result = {"type": assertion.get("type"), "passed": False, "message": ""}
     try:
         typ = assertion["type"]
@@ -216,10 +214,10 @@ def _new_session(server_url, runtime, platform):
 
 
 def run_scenario(server_url, runtime, platform, scenario, out_root):
-    """Own one Appium session and return scenario status, actions, captured IDs, and failure detail.
+    """Own one Appium session and return sanitized scenario/action/capture evidence.
     
-    continueOnFailure records a failed action but can still return status passed.
-    Session quit is attempted in finally; cleanup failures are not surfaced yet."""
+    Continue-on-failure permits later steps but never changes a failed scenario to
+    passed. False assertions also fail the scenario. Quit is attempted in finally."""
     driver = None
     run = {
         "scenario": scenario["name"],

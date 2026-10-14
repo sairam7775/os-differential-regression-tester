@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased - review stabilization (2026-10-14)
+
+- Verified native control identity/per-locator ordinals/descendant safety before automatic taps; removed uncertain coordinate/gesture retries.
+- Added mandatory prohibited-action forms, narrow permission-only system traversal, and secure-field requirements for secrets.
+- Replaced Windows destructive PID polling with safe process queries and kernel-owned locks released on success/error/cancellation.
+- Preserved valid XML during redaction; sanitized known values in nested metadata, traces, summaries, errors, and retained logs.
+- Rejected malformed/missing/empty evidence, failed baseline assertions/actions, missing candidate actions, invalid images/hierarchies, and bad timing values.
+- Combined both-device reset/input evidence and made every failed/missing candidate branch partial; retained reset evidence after action errors.
+- Required positive common OS difference excluding hardware fingerprint portions, verified iOS physical enumeration, and added post-run app/OS/target identity checks.
+- Hardened Appium readiness/base-path/spawn/timeout cleanup, private emulator logs, PowerShell Python setup failures, and shared ADB lookup.
+- Removed global SDK stubs and added Windows/Linux Python 3.11/3.14 CI with independent module and CLI argument checks. See docs/REVIEW_FIXES.md for exact results and compatibility changes.
+- Updated comments, configuration notes, developer handoff, and privacy/coverage documentation. Version remains 0.5.0; no real-device validation is claimed.
+
 ## Unreleased — Developer documentation and comments
 
 - Added module/helper contract docstrings and test-module scope notes without changing executable Python statements.

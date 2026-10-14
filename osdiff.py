@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Command-line orchestration for OS differential comparisons.
+"""Command-line orchestration, target ownership, private artifacts, and result exit codes.
 
-Market mode inspects two preinstalled physical-device builds. Virtual modes
-provision emulators/simulators and use an operator-supplied binary. This module
-owns Appium process handles, run directories, report generation, and exit codes.
-See docs/DEVELOPER_GUIDE.md for the call graph and docs/BASELINE_ASSESSMENT.md
-for unresolved validity, locking, and privacy issues in the imported baseline.
-"""
+Market mode probes unchanged preinstalled physical-device builds before and after
+crawling. Virtual modes provision targets with the supplied binary. Optional SDK
+and image imports are deferred so help and prerequisite commands remain usable."""
 
 from __future__ import annotations
 
@@ -125,10 +122,10 @@ def _redact_file(path, env_names, sensitive_values=None):
 
 
 def start_appium(cfg, run_root=None):
-    """Reuse a responding server or start a local server and return its ownership handle.
+    """Reuse a ready server or start a local HTTP server at the configured address/base path.
     
-    An external server is never stopped by this tool. Base-path/TLS/address support
-    and startup-failure process cleanup need further validation."""
+    Only owned processes are stopped. Parent log handles close even on spawn failure;
+    startup timeout terminates and waits before reporting a redacted log path."""
     appium_cfg = cfg.get("appium", {})
     url = appium_cfg.get("serverUrl", "http://127.0.0.1:4723")
     if appium_ready(url):
@@ -873,7 +870,7 @@ def doctor(args):
 
 
 def list_targets(args):
-    """Print configured virtual-target availability; emulator listing currently lacks a timeout."""
+    """Print configured virtual-target availability with bounded subprocess calls."""
     print("\nAndroid AVDs")
     emulator = devices.emulator_path()
     if emulator:
@@ -1041,10 +1038,10 @@ def _market_invalid_result(platform_name, validation):
 
 
 def market_run_cmd(args):
-    """Verify preinstalled builds, crawl baseline, replay candidate, and write market evidence.
+    """Gate preinstalled physical builds, discover/replay, recheck identity, and report.
     
-    No app binary is supplied by the normal market runtime. Preflight identity
-    checks and policy-derived coverage still have the gaps in the baseline assessment."""
+    Exact app version/build and positive OS difference are mandatory. No app binary
+    is supplied. Identity changes or unavailable post-run probes invalidate the result."""
     from osdiff import market
     from osdiff.crawler import crawl_baseline, replay_candidate_graph, coverage_summary
 
@@ -1225,10 +1222,10 @@ def market_run_cmd(args):
         stop_appium(appium_handle, cfg)
 
 def main():
-    """Parse CLI arguments and translate execution errors/cancellation into process exit codes.
+    """Dispatch CLI commands and release our run lock on success, error, or cancellation.
     
-    Known lifecycle defect: the acquired run lock has no cleanup finally block.
-    Documentation additions do not repair this behavior."""
+    Run modes share kernel ownership; configured credentials and selected device IDs
+    are removed from reported exception text. Exit-code meanings remain compatible."""
     parser = argparse.ArgumentParser(
         prog="osdiff",
         description="Local old-OS vs new-OS mobile differential regression tester",
