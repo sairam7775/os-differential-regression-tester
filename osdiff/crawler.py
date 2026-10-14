@@ -911,8 +911,11 @@ def coverage_summary(baseline_graph, candidate_replay):
               *(item for failure in failures for rec in failure.get("trace", []) for item in rec.get("blockedInputs", []))]
     branched = max(baseline_graph.get("attemptedPaths", 0), len(baseline_graph.get("screens", [])),
                    candidate_replay.get("baselineScreens", 0), candidate_replay.get("reproducedScreens", 0)+len(failures)) > 1
+    expected = max(baseline_graph.get("discoveredScreens", 0), len(baseline_graph.get("screens", [])),
+                   candidate_replay.get("baselineScreens", 0))
     incomplete = (baseline_graph.get("coverageStatus") != "COMPLETE_WITHIN_POLICY" or inputs
-                  or any(f.get("artifactInvalid") for f in failures) or (branched and reset is not True))
+                  or failures or candidate_replay.get("reproducedScreens", 0) < expected
+                  or (branched and reset is not True))
     return {
         "mode": "automatic", "discoveredBaselineScreens": int(baseline_graph.get("discoveredScreens", 0)),
         "candidateScreensReproduced": int(candidate_replay.get("reproducedScreens", 0)),

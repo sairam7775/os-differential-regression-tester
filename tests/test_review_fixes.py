@@ -299,6 +299,12 @@ class ResetAndLockTests(unittest.TestCase):
     def test_candidate_blocked_inputs_invalidate_coverage(self):
         coverage=crawler.coverage_summary({"coverageStatus":"COMPLETE_WITHIN_POLICY","deterministicReset":True},{"deterministicReset":True,"blockedInputs":[{"reason":"missing_input"}]})
         self.assertEqual(coverage["coverageStatus"],"PARTIAL")
+    def test_failed_or_missing_candidate_paths_are_never_complete(self):
+        baseline={"coverageStatus":"COMPLETE_WITHIN_POLICY","discoveredScreens":2,"deterministicReset":True}
+        for candidate in ({"baselineScreens":2,"reproducedScreens":1,"deterministicReset":True},
+                          {"baselineScreens":2,"reproducedScreens":2,"deterministicReset":True,"failedPaths":[{"error":"synthetic failure"}]}):
+            with self.subTest(candidate=candidate):
+                self.assertEqual(crawler.coverage_summary(baseline,candidate)["coverageStatus"],"PARTIAL")
     def test_market_cannot_use_simulator_reinstall_even_with_binary(self):
         with self.assertRaises(RuntimeError), patch.object(crawler.subprocess,"run") as run:
             crawler._prepare_path(Driver(android(button("Settings"))),{"bundleId":"com.app","udid":"fake","preinstalled":True,"appPath":"fake.app","resetStrategy":"ios_simulator_reinstall"},"ios",{})
