@@ -768,7 +768,9 @@ def _node_supported(version):
 def _run_version(cmd, args):
     """Run a bounded version command and return its code and stdout/stderr detail."""
     try:
-        result = subprocess.run([cmd, *args], text=True, capture_output=True, timeout=10)
+        # Windows CreateProcess does not resolve a bare npm name through PATHEXT.
+        executable = shutil.which(cmd) or cmd
+        result = subprocess.run([executable, *args], text=True, capture_output=True, timeout=10)
         return result.returncode, (result.stdout or result.stderr).strip()
     except Exception as exc:
         return 1, str(exc)

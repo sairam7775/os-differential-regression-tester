@@ -343,6 +343,13 @@ class ResetAndLockTests(unittest.TestCase):
 
 
 class AppiumLifecycleTests(unittest.TestCase):
+    def test_version_probe_uses_resolved_windows_command_launcher(self):
+        cli=cli_module()
+        result=subprocess.CompletedProcess([],0,stdout='11.16.0\n',stderr='')
+        with patch.object(cli.shutil,'which',return_value='C:/node/npm.cmd'), patch.object(cli.subprocess,'run',return_value=result) as run:
+            self.assertEqual(cli._run_version('npm',['--version']),(0,'11.16.0'))
+        self.assertEqual(run.call_args.args[0],['C:/node/npm.cmd','--version'])
+
     def test_http_success_without_ready_flag_is_not_ready(self):
         cli=cli_module()
         for payload, expected in (({},False),({'value':{'ready':False}},False),({'value':{'ready':True}},True)):
