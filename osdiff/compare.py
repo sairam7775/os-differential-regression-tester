@@ -22,11 +22,8 @@ from osdiff.fsutil import private_dir, private_file, write_json, write_text
 
 
 def _load(path, default=None):
-    """Load JSON or return default on any error; malformed evidence is currently hidden."""
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except Exception:
-        return default
+    """Load evidence without treating malformed JSON as an empty successful capture."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def _normalized_attr(value, cfg):
@@ -50,7 +47,7 @@ def _signature_counts(path, cfg):
             "hierarchyAttributes",
             [
                 "type", "class", "name", "label", "resource-id",
-                "content-desc", "enabled", "clickable",
+                "content-desc", "text", "value", "enabled", "clickable",
             ],
         )
     )
@@ -70,7 +67,7 @@ def _signature_counts(path, cfg):
             walk(child, depth + 1, kind)
 
     walk(root)
-    return counts, None
+    return counts, None if counts else "Hierarchy has no comparable native controls"
 
 
 def hierarchy_result(a, b, cfg):
@@ -194,6 +191,8 @@ def _behavior(baseline_state, candidate_state, cfg):
             if index < len(candidate_assertions)
             else {"passed": False, "message": "candidate assertion missing"}
         )
+        if baseline.get("passed") is not True:
+            out.append({"type": "baseline_assertion_failed", "index": index})
         if baseline.get("passed") and not candidate.get("passed"):
             out.append(
                 {
@@ -208,10 +207,15 @@ def _behavior(baseline_state, candidate_state, cfg):
     candidate_actions = candidate_state.get("recentActions", [])
     factor = float(cfg.get("durationRegressionFactor", 1.75))
     extra = float(cfg.get("minimumDurationRegressionSeconds", 1.0))
-    for index in range(min(len(baseline_actions), len(candidate_actions))):
+    for index in range(len(baseline_actions)):
         baseline = baseline_actions[index]
+        if index >= len(candidate_actions):
+            out.append({"type": "action_failure", "index": index, "message": "candidate action missing"})
+            continue
         candidate = candidate_actions[index]
-        if baseline.get("status") == "passed" and candidate.get("status") == "failed":
+        if baseline.get("status") != "passed":
+            out.append({"type": "baseline_action_failed", "index": index})
+        if baseline.get("status") == "passed" and candidate.get("status") != "passed":
             out.append(
                 {
                     "type": "action_failure",
@@ -251,9 +255,21 @@ def _discover(root):
 
 
 def _summary_map(path):
-    """Index run-summary entries by scenario; duplicate names overwrite earlier entries."""
-    data = _load(path, []) or []
-    return {entry.get("scenario"): entry for entry in data if entry.get("scenario")}
+    """Validate nonempty, uniquely named scenario evidence before indexing it."""
+    data = _load(path)
+    if not isinstance(data, list) or not data:
+        raise ValueError("Run summary must contain scenario records")
+    result = {}
+    for entry in data:
+        if not isinstance(entry, dict) or not isinstance(entry.get("scenario"), str) or not entry["scenario"] or entry["scenario"] in result or entry.get("status") not in ("passed", "failed"):
+            raise ValueError("Malformed or duplicate scenario evidence")
+        if "actions" in entry:
+            if not isinstance(entry["actions"], list) or any(not isinstance(a, dict) or a.get("status") not in ("passed", "failed") for a in entry["actions"]):
+                raise ValueError("Malformed summary action evidence")
+            if any(a.get("status") == "failed" for a in entry["actions"]):
+                entry = dict(entry, status="failed", error=entry.get("error") or "Scenario action failed")
+        result[entry["scenario"]] = entry
+    return result
 
 
 def _execution_results(results_root, platform):
@@ -263,8 +279,7 @@ def _execution_results(results_root, platform):
     Malformed or empty summaries currently need additional fail-closed validation."""
     base_path = Path(results_root) / platform / "baseline" / "run-summary.json"
     cand_path = Path(results_root) / platform / "candidate" / "run-summary.json"
-    baseline = _summary_map(base_path)
-    candidate = _summary_map(cand_path)
+    baseline, candidate = {}, {}
     output = []
 
     if not base_path.exists():
@@ -305,6 +320,20 @@ def _execution_results(results_root, platform):
         )
         return output
 
+    for role, path in (("baseline", base_path), ("candidate", cand_path)):
+        try:
+            parsed = _summary_map(path)
+            if role == "baseline":
+                baseline = parsed
+            else:
+                candidate = parsed
+        except Exception:
+            output.append({"platform": platform, "scenario": "__run__", "checkpoint": "__execution__",
+                "comparisonStatus": "INVALID", "riskScore": 100, "severity": "Invalid",
+                "reasons": [f"{role}_run_summary_invalid"], "behaviorRegressions": [],
+                "hierarchyChangeRatio": 0.0, "visual": {}, "missingBaseline": False, "missingCandidate": False})
+    if output:
+        return output
     for scenario in sorted(set(baseline) | set(candidate)):
         b = baseline.get(scenario)
         c = candidate.get(scenario)
@@ -495,11 +524,23 @@ def compare_platform(results_root, platform, cfg, report_root):
         }
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{scenario}__{checkpoint}")
         if baseline_dir and candidate_dir:
-            baseline_state = _load(baseline_dir / "state.json", {}) or {}
-            candidate_state = _load(candidate_dir / "state.json", {}) or {}
+            try:
+                baseline_state = _load(baseline_dir / "state.json")
+                candidate_state = _load(candidate_dir / "state.json")
+                for state in (baseline_state, candidate_state):
+                    if not isinstance(state, dict) or any(not isinstance(state.get(key), list) or any(not isinstance(entry, dict) for entry in state[key]) for key in ("assertions", "recentActions")):
+                        raise ValueError("Malformed checkpoint evidence")
+                    if any(a.get("passed") not in (True, False) for a in state["assertions"]) or any(a.get("status") not in ("passed", "failed") for a in state["recentActions"]):
+                        raise ValueError("Incomplete assertion/action evidence")
+            except Exception:
+                item.update(comparisonStatus="INVALID", riskScore=100, severity="Invalid", reasons=["checkpoint_state_invalid"])
+                output.append(item)
+                continue
             item["behaviorRegressions"] = _behavior(
                 baseline_state, candidate_state, cfg
             )
+            if any(b["type"] in ("baseline_assertion_failed", "baseline_action_failed") for b in item["behaviorRegressions"]):
+                item.update(comparisonStatus="INVALID", riskScore=100, severity="Invalid", reasons=["baseline_checkpoint_invalid"])
             hierarchy = hierarchy_result(
                 baseline_dir / "source.xml", candidate_dir / "source.xml", cfg
             )
@@ -518,18 +559,25 @@ def compare_platform(results_root, platform, cfg, report_root):
             baseline_image = assets / f"{safe}__baseline.png"
             candidate_image = assets / f"{safe}__candidate.png"
             diff_image = assets / f"{safe}__diff.png"
-            shutil.copyfile(baseline_dir / "screen.png", baseline_image)
-            shutil.copyfile(candidate_dir / "screen.png", candidate_image)
-            private_file(baseline_image); private_file(candidate_image)
-            item["visual"] = visual(
-                baseline_image, candidate_image, diff_image, cfg, platform
-            )
-            item["images"] = {
-                "baseline": str(baseline_image.relative_to(report_root)),
-                "candidate": str(candidate_image.relative_to(report_root)),
-                "diff": str(diff_image.relative_to(report_root)),
-            }
+            try:
+                shutil.copyfile(baseline_dir / "screen.png", baseline_image)
+                shutil.copyfile(candidate_dir / "screen.png", candidate_image)
+                private_file(baseline_image); private_file(candidate_image)
+                item["visual"] = visual(
+                    baseline_image, candidate_image, diff_image, cfg, platform
+                )
+                item["images"] = {
+                    "baseline": str(baseline_image.relative_to(report_root)),
+                    "candidate": str(candidate_image.relative_to(report_root)),
+                    "diff": str(diff_image.relative_to(report_root)),
+                }
+                private_file(diff_image)
+            except Exception:
+                item.update(comparisonStatus="INVALID", riskScore=100, severity="Invalid", reasons=["screenshot_capture_invalid"])
 
+
+        if item["missingBaseline"]:
+            item.update(comparisonStatus="INVALID", riskScore=100, severity="Invalid", reasons=["baseline_coverage_missing"])
         if item.get("comparisonStatus") != "INVALID":
             score, reasons = _score(item, cfg)
             item["riskScore"] = score
@@ -555,6 +603,8 @@ def write_report(report_root, results, project_name="Mobile App", coverage=None,
     invalid provenance overrides scores; an empty results list alone is not validated.
     The current checkpoint count also includes invalid non-synthetic rows."""
     report_root = private_dir(report_root)
+    if not results:
+        results = [{"platform": "unknown", "scenario": "__run__", "checkpoint": "__no_results__", "comparisonStatus": "INVALID", "riskScore": 100, "severity": "Invalid", "reasons": ["no_comparison_results"], "behaviorRegressions": [], "visual": {}, "hierarchyChangeRatio": 0.0}]
     results = sorted(
         results,
         key=lambda result: (
@@ -589,8 +639,8 @@ def write_report(report_root, results, project_name="Mobile App", coverage=None,
         visual_result = result.get("visual", {})
         behavior_json = _e(json.dumps(result["behaviorRegressions"], indent=2))
         details.append(
-            f"<section id='d{index}'><h2>{_e(result['platform'])} · "
-            f"{_e(result['scenario'])} · {_e(result['checkpoint'])}</h2>"
+            f"<section id='d{index}'><h2>{_e(result['platform'])} Â· "
+            f"{_e(result['scenario'])} Â· {_e(result['checkpoint'])}</h2>"
             f"<p><b>Status:</b> {_e(result.get('comparisonStatus',''))} &nbsp; "
             f"<b>Risk:</b> {result['riskScore']} ({_e(result['severity'])}) &nbsp; "
             f"<b>Reason:</b> {_e(reason)}</p>"
@@ -625,7 +675,7 @@ section{border-top:2px solid #ddd;margin-top:30px;padding-top:16px}"""
     valid_checkpoints = sum(
         1
         for result in results
-        if not result["checkpoint"].startswith("__")
+        if not result["checkpoint"].startswith("__") and result.get("comparisonStatus") != "INVALID"
     )
     banner = (
         "<div class='banner-invalid'><b>INVALID comparison:</b> One or more provenance, baseline, execution, hierarchy, "
@@ -695,7 +745,7 @@ section{border-top:2px solid #ddd;margin-top:30px;padding-top:16px}"""
             "<div class='coverage-grid'>" + "".join(cards) + "</div>"
         )
     body = f"""<!doctype html><html><head><meta charset="utf-8"><title>OS Differential Regression Report</title>
-<style>{css}</style></head><body><h1>{_e(project_name)} — OS Differential Regression Report</h1>
+<style>{css}</style></head><body><h1>{_e(project_name)} â€” OS Differential Regression Report</h1>
 {banner}
 {provenance_html}
 {coverage_html}
