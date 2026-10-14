@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 import shutil
 from collections import Counter
@@ -530,8 +531,12 @@ def compare_platform(results_root, platform, cfg, report_root):
                 for state in (baseline_state, candidate_state):
                     if not isinstance(state, dict) or any(not isinstance(state.get(key), list) or any(not isinstance(entry, dict) for entry in state[key]) for key in ("assertions", "recentActions")):
                         raise ValueError("Malformed checkpoint evidence")
-                    if any(a.get("passed") not in (True, False) for a in state["assertions"]) or any(a.get("status") not in ("passed", "failed") for a in state["recentActions"]):
+                    if any(type(a.get("passed")) is not bool for a in state["assertions"]) or any(a.get("status") not in ("passed", "failed") for a in state["recentActions"]):
                         raise ValueError("Incomplete assertion/action evidence")
+                    for action in state["recentActions"]:
+                        duration = action.get("durationSeconds")
+                        if type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0:
+                            raise ValueError("Invalid action timing evidence")
             except Exception:
                 item.update(comparisonStatus="INVALID", riskScore=100, severity="Invalid", reasons=["checkpoint_state_invalid"])
                 output.append(item)

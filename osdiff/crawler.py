@@ -83,7 +83,7 @@ def _identified_control(node, nodes, platform):
 def _permission_action(node, platform):
     if platform == "android":
         return bool(re.search(r":id/permission_(?:allow|deny)(?:_[a-z]+)*_button$", node.attrib.get("resource-id", "")))
-    return _label(platform, node.attrib).lower().replace("ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢", "'") in PERMISSION_LABELS
+    return _label(platform, node.attrib).lower().replace("\u2019", "'") in PERMISSION_LABELS
 
 def _attribute(element, names):
     for name in names:
@@ -100,6 +100,8 @@ def _verify_live_control(element, identity, platform, cfg):
     aliases = {"resource-id": ("resourceId", "resource-id"), "class": ("className", "class"),
                "content-desc": ("contentDescription", "content-desc")}
     expected = identity["attributes"]
+    if (_attribute(element, ("enabled",)) or "").lower() != "true":
+        raise RuntimeError("Live control is not enabled")
     for key, value in expected.items():
         if _attribute(element, aliases.get(key, (key,))) != str(value):
             raise RuntimeError("Live control identity changed before interaction")
@@ -727,6 +729,7 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
                 driver = None
                 continue
             driver = used_driver
+            state_id = None
             try:
                 time.sleep(settle)
                 source = driver.page_source or ""
@@ -776,7 +779,7 @@ def crawl_baseline(server_url, runtime, platform, out_root, cfg):
                     graph["edges"].append({"from": checkpoint, "action": action, "depth": len(child_path)})
             except Exception as exc:
                 graph["replayFailures"].append({"path": path_actions, "error": redact_values(f"capture_or_state_failed:{type(exc).__name__}", _sensitive_values(cfg)), "trace": trace})
-                if 'state_id' in locals():
+                if state_id is not None:
                     visited.pop(state_id, None)
                 _close_driver(driver)
                 driver = None
@@ -843,6 +846,7 @@ def replay_candidate_graph(server_url, runtime, platform, baseline_graph, out_ro
                 driver = None
                 continue
             driver = used_driver
+            state_id = None
             try:
                 time.sleep(float(cfg.get("settleSeconds", 0.6)))
                 source = driver.page_source or ""

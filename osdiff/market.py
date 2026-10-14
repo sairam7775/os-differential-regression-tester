@@ -455,6 +455,21 @@ def _sanitized_device(device):
     return item
 
 
+def validate_market_pair_after_run(baseline, candidate, final_baseline, final_candidate, **policy):
+    """Reject store updates, OS changes, or target changes between preflight and capture."""
+    validation = validate_market_pair(final_baseline, final_candidate, **policy)
+    for role, before, after in (("baseline", baseline, final_baseline), ("candidate", candidate, final_candidate)):
+        if any(str(before.get(key)) != str(after.get(key)) for key in ("appId", "appVersion", "appBuild")):
+            validation["errors"].append(f"{role}_app_changed_during_run")
+        if before.get("deviceId") != after.get("deviceId"):
+            validation["errors"].append(f"{role}_device_changed_during_run")
+        if _os_identity(before) != _os_identity(after):
+            validation["errors"].append(f"{role}_os_changed_during_run")
+    validation["valid"] = not validation["errors"]
+    validation["postRunIdentityVerified"] = validation["valid"]
+    return validation
+
+
 def write_provenance(path, baseline, candidate, validation):
     """Persist sanitized baseline/candidate facts and validation under the real-device market mode."""
     data = {

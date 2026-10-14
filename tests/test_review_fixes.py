@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import io
 from pathlib import Path
 from unittest.mock import patch
 from xml.etree import ElementTree as ET
@@ -37,7 +38,7 @@ class Element:
         self.typed = []
     def get_attribute(self, name):
         name = {"resourceId":"resource-id", "className":"class", "contentDescription":"content-desc"}.get(name, name)
-        return self.node.attrib.get(name)
+        return self.node.attrib.get(name, "true" if name == "enabled" else None)
     def find_elements(self, *args):
         return [Element(child) for child in self.node.iter() if child is not self.node]
     def clear(self):
@@ -130,8 +131,21 @@ class SafeControlTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             crawler._tap(Driver(android(button("Settings"))),"android",{"kind":"tap","bounds":{"x":1,"y":1,"width":10,"height":10}}, {})
 
+    def test_live_control_disabled_after_source_capture_is_not_clicked(self):
+        source = android(button("Settings"))
+        action = crawler.discover_actions(source, "android", {})[0][0]
+        driver = Driver(source)
+        driver.elements[-1].node.set("enabled", "false")
+        with patch.object(crawler, "_find_elements", side_effect=lambda d,l:d.find(l)):
+            with self.assertRaises(RuntimeError):
+                crawler._tap(driver, "android", action, {})
+        self.assertEqual(driver.elements[-1].clicked, 0)
+
 
 class ForegroundTests(unittest.TestCase):
+    def test_ios_permission_uses_curly_apostrophe(self):
+        node=ET.fromstring('<node type="XCUIElementTypeButton" label="Don\u2019t Allow"/>')
+        self.assertTrue(crawler._permission_action(node, 'ios'))
     def test_settings_and_installer_are_rejected_even_if_configured(self):
         driver=Driver(android(button("Settings")))
         for package in ("com.android.settings","com.android.packageinstaller","com.other"):
@@ -239,8 +253,33 @@ class OsIdentityTests(unittest.TestCase):
         b,c=self.pair(); c.update(osVersion="15",physicalDevice=False)
         self.assertIn("physical_device_not_verified",market.validate_market_pair(b,c)["errors"])
 
+    def test_post_run_identity_requires_unchanged_app_os_and_target(self):
+        baseline, candidate = self.pair()
+        candidate["osVersion"] = "15"
+        result = market.validate_market_pair_after_run(baseline, candidate, dict(baseline), dict(candidate))
+        self.assertTrue(result["postRunIdentityVerified"])
+        for key, value, reason in (("appBuild", "11", "candidate_app_changed_during_run"),
+                                   ("osVersion", "16", "candidate_os_changed_during_run"),
+                                   ("deviceId", "C", "candidate_device_changed_during_run")):
+            with self.subTest(key=key):
+                after = dict(candidate, **{key:value})
+                result = market.validate_market_pair_after_run(baseline, candidate, dict(baseline), after)
+                self.assertFalse(result["postRunIdentityVerified"])
+                self.assertIn(reason, result["errors"])
+
 
 class ResetAndLockTests(unittest.TestCase):
+    def test_state_read_failure_does_not_remove_previous_screen(self):
+        driver=Driver(android(button('Settings')))
+        class BrokenDriver:
+            @property
+            def page_source(self): raise RuntimeError('synthetic source failure')
+            def quit(self): pass
+        with tempfile.TemporaryDirectory() as td, patch.object(crawler,'replay_path',side_effect=[(driver,[],None,True),(BrokenDriver(),[],None,True)]), patch.object(crawler,'_save_checkpoint'), patch.object(crawler,'fill_known_inputs',return_value=([],[])):
+            graph=crawler.crawl_baseline('url',{'appPackage':'com.app'},'android',Path(td),{'settleSeconds':0})
+        self.assertEqual(graph['discoveredScreens'],1)
+        self.assertEqual(len(graph['screens']),1)
+        self.assertEqual(graph['coverageStatus'],'PARTIAL')
     def test_pid_is_not_used_for_state_identity(self):
         source=android('<node class="TextView" text="Home"/>')
         self.assertEqual(crawler.state_fingerprint(source,{}, {"bundleId":"com.app","pid":1}), crawler.state_fingerprint(source,{}, {"bundleId":"com.app","pid":2}))
@@ -295,6 +334,53 @@ class ResetAndLockTests(unittest.TestCase):
         cli=cli_module()
         with patch.object(cli.os,"kill",side_effect=AssertionError("os.kill must not run on Windows")):
             self.assertTrue(cli._pid_alive(os.getpid()))
+
+
+class AppiumLifecycleTests(unittest.TestCase):
+    def test_http_success_without_ready_flag_is_not_ready(self):
+        cli=cli_module()
+        for payload, expected in (({},False),({'value':{'ready':False}},False),({'value':{'ready':True}},True)):
+            response=io.StringIO(json.dumps(payload)); response.status=200
+            with patch.object(cli.urllib.request,'urlopen',return_value=response):
+                self.assertEqual(cli.appium_ready('http://localhost:4723'),expected)
+
+    def test_start_uses_url_address_and_base_path(self):
+        cli=cli_module()
+        with tempfile.TemporaryDirectory() as td, patch.object(cli,'appium_ready',side_effect=[False,True]), patch.object(cli,'appium_bin',return_value='appium'), patch.object(cli.subprocess,'Popen') as popen:
+            result=cli.start_appium({'appium':{'serverUrl':'http://localhost:4723/wd/hub'}},Path(td))
+            command=popen.call_args.args[0]
+            self.assertEqual(command[command.index('--base-path')+1],'/wd/hub')
+            self.assertEqual(command[command.index('--address')+1],'localhost')
+            self.assertFalse(result['external'])
+            self.assertTrue(popen.call_args.kwargs['stdout'].closed)
+
+    def test_spawn_failure_closes_log_handle(self):
+        cli=cli_module(); handles=[]
+        def fail(*args,**kwargs):
+            handles.append(kwargs['stdout']); raise OSError('synthetic spawn failure')
+        with tempfile.TemporaryDirectory() as td, patch.object(cli,'appium_ready',return_value=False), patch.object(cli,'appium_bin',return_value='appium'), patch.object(cli.subprocess,'Popen',side_effect=fail):
+            with self.assertRaises(OSError): cli.start_appium({},Path(td))
+        self.assertTrue(handles[0].closed)
+
+    def test_startup_timeout_terminates_and_waits(self):
+        cli=cli_module()
+        with tempfile.TemporaryDirectory() as td, patch.object(cli,'appium_ready',return_value=False), patch.object(cli,'appium_bin',return_value='appium'), patch.object(cli.subprocess,'Popen') as popen:
+            with self.assertRaises(RuntimeError): cli.start_appium({'appium':{'startupTimeoutSeconds':0}},Path(td))
+            popen.return_value.terminate.assert_called_once()
+            popen.return_value.wait.assert_called_once_with(timeout=8)
+
+    def test_external_server_is_not_stopped(self):
+        cli=cli_module()
+        with patch.object(cli,'appium_ready',return_value=True), patch.object(cli.subprocess,'Popen') as popen:
+            handle=cli.start_appium({}); cli.stop_appium(handle,{})
+        popen.assert_not_called()
+
+    def test_log_redaction_handles_configured_secret_and_target_id(self):
+        cli=cli_module()
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ,{'CUSTOM_SECRET':'synthetic-secret'}):
+            path=Path(td)/'appium.log'; path.write_text('synthetic-secret at synthetic-serial',encoding='utf-8')
+            cli._redact_file(path,['CUSTOM_SECRET'],['synthetic-serial'])
+            self.assertEqual(path.read_text(encoding='utf-8'),'[REDACTED] at [REDACTED]')
 
 
 if __name__ == "__main__":

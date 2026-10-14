@@ -172,7 +172,7 @@ def _execute(driver, platform, step):
         raise ValueError(f"Unsupported step type: {typ}")
 
 
-def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle_seconds, sensitive_env_names=None, sensitive_regions=None, sensitive_device_ids=None):
+def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle_seconds, sensitive_env_names=None, sensitive_regions=None, sensitive_device_ids=None, sensitive_values=None):
     """Evaluate readiness assertions, settle, and persist screenshot/source/state artifacts.
     
     Assertions returning false do not stop capture. recentActions covers steps since
@@ -195,6 +195,7 @@ def _checkpoint(driver, platform, scenario_name, step, actions, out_root, settle
     source = driver.page_source or ""
     secrets = [os.getenv(name) for name in (sensitive_env_names or []) if os.getenv(name)]
     secrets += [value for value in (sensitive_device_ids or []) if value]
+    secrets += list(sensitive_values or [])
     write_text(folder / "source.xml", redact_xml(source, secrets))
     state = {
         "scenario": scenario_name,
@@ -229,6 +230,11 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
         "completedSteps": 0,
     }
     recent = []
+    secrets = [runtime.get("udid"), *[os.getenv(name) for name in runtime.get("sensitiveEnvNames", ["TEST_USER_EMAIL", "TEST_USER_PASSWORD"])]]
+    for step in scenario["steps"]:
+        if step.get("type") == "type_text":
+            text = str(step.get("text", ""))
+            secrets.append(os.path.expandvars(text))
     try:
         driver = _new_session(server_url, runtime, platform)
         for step in scenario["steps"]:
@@ -246,6 +252,7 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
                     runtime.get("sensitiveEnvNames", ["TEST_USER_EMAIL", "TEST_USER_PASSWORD"]),
                     runtime.get("sensitiveRegions", {}),
                     [runtime.get("udid")],
+                    secrets,
                 )
                 if any(item.get("passed") is not True for item in state["assertions"]):
                     run["assertionFailed"] = True
@@ -283,7 +290,6 @@ def run_scenario(server_url, runtime, platform, scenario, out_root):
                 driver.quit()
             except Exception:
                 pass
-    secrets = [runtime.get("udid"), *[os.getenv(name) for name in runtime.get("sensitiveEnvNames", ["TEST_USER_EMAIL", "TEST_USER_PASSWORD"])]]
     return redact_data(run, secrets)
 
 

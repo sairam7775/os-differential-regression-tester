@@ -111,19 +111,16 @@ def appium_ready(url):
         return False
 
 
-def _redact_file(path, env_names):
-    """Best-effort literal secret replacement in a server log; other artifacts are unaffected."""
+def _redact_file(path, env_names, sensitive_values=None):
+    """Sanitize known credentials and identifiers in retained local server logs."""
     path = Path(path)
     if not path.exists():
         return
     try:
+        values = [os.getenv(name) for name in env_names] + list(sensitive_values or [])
         text = path.read_text(encoding="utf-8", errors="replace")
-        for env_name in env_names:
-            secret = os.getenv(env_name)
-            if secret:
-                text = text.replace(secret, "<REDACTED>")
-        path.write_text(text, encoding="utf-8")
-    except Exception:
+        path.write_text(redact_values(text, values), encoding="utf-8")
+    except OSError:
         pass
 
 
@@ -166,23 +163,25 @@ def start_appium(cfg, run_root=None):
         pass
 
     log_level = str(appium_cfg.get("logLevel", "error"))
-    proc = subprocess.Popen(
-        [
-            exe,
-            "--address",
-            host,
-            "--base-path",
-            parsed.path.rstrip("/") or "/",
-            "--port",
-            str(port),
-            "--log-level",
-            log_level,
-        ],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        env=appium_env(),
-    )
-    log_handle.close()
+    try:
+        proc = subprocess.Popen(
+            [
+                exe,
+                "--address",
+                host,
+                "--base-path",
+                parsed.path.rstrip("/") or "/",
+                "--port",
+                str(port),
+                "--log-level",
+                log_level,
+            ],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            env=appium_env(),
+        )
+    finally:
+        log_handle.close()
 
     deadline = time.time() + int(appium_cfg.get("startupTimeoutSeconds", 30))
     while time.time() < deadline:
@@ -198,7 +197,7 @@ def start_appium(cfg, run_root=None):
     except Exception:
         proc.kill()
         proc.wait(timeout=8)
-    _redact_file(log, appium_cfg.get("sensitiveEnvNames", []))
+    _redact_file(log, appium_cfg.get("sensitiveEnvNames", []), cfg.get("_sensitiveValues"))
     raise RuntimeError(f"Appium did not start. See redacted log: {log}")
 
 
@@ -214,13 +213,14 @@ def stop_appium(handle, cfg):
         except Exception:
             try:
                 proc.kill()
+                proc.wait(timeout=8)
             except Exception:
                 pass
 
     log = handle.get("log")
     if log:
         appium_cfg = cfg.get("appium", {})
-        _redact_file(log, appium_cfg.get("sensitiveEnvNames", []))
+        _redact_file(log, appium_cfg.get("sensitiveEnvNames", []), cfg.get("_sensitiveValues"))
         if not bool(appium_cfg.get("saveServerLog", False)):
             try:
                 Path(log).unlink()
@@ -967,7 +967,7 @@ def list_real_devices_cmd(args):
     from osdiff import market
 
     print("\nAndroid physical devices")
-    if command_exists("adb"):
+    if devices.adb_path():
         devices_found = []
         for item in market.list_android_devices():
             serial = item.get("serial", "")
@@ -1050,6 +1050,7 @@ def market_run_cmd(args):
 
     cfg = load_config(args.config)
     platform_name = args.platform
+    cfg["_sensitiveValues"] = [args.baseline_device, args.candidate_device]
     policy = cfg.get("marketMode", {})
     crawler_cfg = dict(cfg.get("crawler", {}))
     crawler_cfg["sensitiveValues"] = [
@@ -1186,15 +1187,9 @@ def market_run_cmd(args):
             else:
                 final_b = market.probe_ios_market_device(server, args.baseline_device, args.app_id, app_store_confirmed=args.ios_app_store_confirmed)
                 final_c = market.probe_ios_market_device(server, args.candidate_device, args.app_id, app_store_confirmed=args.ios_app_store_confirmed)
-            final_validation = market.validate_market_pair(final_b, final_c, require_same_model=require_same_model,
+            final_validation = market.validate_market_pair_after_run(
+                baseline, candidate, final_b, final_c, require_same_model=require_same_model,
                 require_matching_environment=bool(policy.get("requireMatchingEnvironment", True)))
-            for role, before, after in (("baseline", baseline, final_b), ("candidate", candidate, final_c)):
-                if any(str(before.get(k)) != str(after.get(k)) for k in ("appId", "appVersion", "appBuild")):
-                    final_validation["errors"].append(f"{role}_app_changed_during_run")
-                if market._os_identity(before) != market._os_identity(after):
-                    final_validation["errors"].append(f"{role}_os_changed_during_run")
-            final_validation["valid"] = not final_validation["errors"]
-            final_validation["postRunIdentityVerified"] = final_validation["valid"]
             provenance = market.write_provenance(report_root / "device-provenance.json", baseline, candidate, final_validation)
         except Exception:
             validation = dict(validation, valid=False, errors=[*validation.get("errors", []), "post_run_identity_unavailable"], postRunIdentityVerified=False)
@@ -1340,6 +1335,13 @@ def main():
         return 130
     except Exception as exc:
         secrets = [os.getenv(name) for name in ("TEST_USER_EMAIL", "TEST_USER_PASSWORD")]
+        try:
+            config = load_config(args.config)
+            secrets += [os.getenv(name) for name in config.get("appium", {}).get("sensitiveEnvNames", [])]
+            from osdiff.crawler import _sensitive_values
+            secrets += _sensitive_values(config.get("crawler", {}))
+        except Exception:
+            pass
         secrets += [getattr(args, "baseline_device", None), getattr(args, "candidate_device", None)]
         print("\nERROR: " + redact_values(str(exc), secrets), file=sys.stderr)
         return 1

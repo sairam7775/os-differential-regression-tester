@@ -59,6 +59,14 @@ class EvidenceTests(unittest.TestCase):
     def test_failed_baseline_action_is_invalid(self):
         self.state('baseline',{"assertions":[],"recentActions":[{"status":"failed","durationSeconds":1}]})
         self.assertEqual(self.summary()['overallStatus'],'INVALID')
+    def test_nonboolean_assertion_is_invalid(self):
+        self.state('baseline', {"assertions":[{"passed":1}], "recentActions":[]})
+        self.assertEqual(self.summary()['overallStatus'],'INVALID')
+    def test_missing_nonfinite_and_negative_timings_are_invalid(self):
+        for duration in (None, "bad", True, float('nan'), float('inf'), -1):
+            with self.subTest(duration=duration):
+                self.state('candidate', {"assertions":[], "recentActions":[{"status":"passed", "durationSeconds":duration}]})
+                self.assertEqual(self.summary()['overallStatus'],'INVALID')
     def test_missing_candidate_action_is_a_critical_regression(self):
         self.state('candidate',{"assertions":[{"passed":True}],"recentActions":[]})
         result=next(r for r in self.results() if r['checkpoint']=='home')
@@ -111,6 +119,14 @@ class CaptureTests(unittest.TestCase):
             result=runner.run_scenario('url',{'udid':'synthetic-serial'},'android',{'name':'flow','steps':[{'type':'tap','continueOnFailure':True}]},Path(td))
         self.assertEqual(result['status'],'failed')
         self.assertTrue(driver.closed)
+    def test_inline_scenario_secret_is_redacted_from_failure(self):
+        class Driver:
+            def quit(self): pass
+        with tempfile.TemporaryDirectory() as td, patch.object(runner,'_new_session',return_value=Driver()), patch.object(runner,'_execute',side_effect=RuntimeError('failed synthetic-inline-secret at synthetic-serial')):
+            result=runner.run_scenario('url',{'udid':'synthetic-serial'},'android',{'name':'flow','steps':[{'type':'type_text','text':'synthetic-inline-secret'}]},Path(td))
+        self.assertEqual(result['status'],'failed')
+        self.assertNotIn('synthetic-inline-secret',json.dumps(result))
+        self.assertNotIn('synthetic-serial',json.dumps(result))
     def test_emulator_log_is_private_and_inside_requested_run(self):
         class Process:
             def poll(self): return None

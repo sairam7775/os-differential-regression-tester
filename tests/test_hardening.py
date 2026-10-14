@@ -141,7 +141,7 @@ class ReportHardeningTests(unittest.TestCase):
             )
             self.assertEqual(summary["overallStatus"], "INVALID")
             self.assertTrue(summary["coverageInvalid"])
-            html = (Path(td)/"index.html").read_text()
+            html = (Path(td)/"index.html").read_text(encoding="utf-8")
             self.assertIn("INVALID comparison", html)
 
     def test_malformed_hierarchy_is_invalid_not_identical(self):
