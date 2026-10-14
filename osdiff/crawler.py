@@ -37,7 +37,7 @@ MANDATORY_DENY_PATTERNS = [
     r"\b(?:un)?pair(?:ing|ed|s)?\b", r"\b(?:dis)?connect(?:ion|ions|ing|ed|s)?\b",
     r"\bbluetooth\b", r"\b(?:re)?print(?:ing|ed|s|er|ers)?\b", r"firmware",
     r"\b(?:pay(?:ment|ments|ing)?|purchas(?:e|es|ing)|buy|checkout|reorder|order)\b",
-    r"\b(?:delete|erase|remove|uninstall|reset|forget|install|update)(?:d|s|ing)?\b",
+    r"\b(?:delet(?:e[ds]?|ing)|eras(?:e[ds]?|ing)|remov(?:e[ds]?|ing)|updat(?:e[ds]?|ing)|(?:un)?install(?:ed|ing|s)?|reset(?:s|ting)?|forget(?:s|ting)?)\b",
     r"\bclear\s+(?:data|storage|cache)\b", r"\bforce\s+stop\b",
     r"\b(?:send|submit)\b", r"\b(?:sign|log)\s*out\b",
     r"\b(?:usb\s+debugging|airplane\s+mode)\b",

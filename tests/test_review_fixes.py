@@ -79,7 +79,7 @@ class SafeControlTests(unittest.TestCase):
 
     def test_required_deny_forms_and_safe_labels(self):
         config = json.loads((ROOT/"config/local-config.json").read_text())["crawler"]
-        for label in ("Unpair", "Pairing device", "Disconnect", "Connecting", "Connected devices", "Forget device", "Payment", "Purchases", "Checkout", "Reorder", "Clear storage", "Force stop", "Install", "Update now", "USB debugging", "Airplane mode", "Reprint"):
+        for label in ("Unpair", "Pairing device", "Disconnect", "Connecting", "Connected devices", "Forget device", "Payment", "Purchases", "Checkout", "Reorder", "Clear storage", "Force stop", "Install", "Update now", "USB debugging", "Airplane mode", "Reprint", "Deleting account", "Erasing data", "Removing device", "Updating app", "Forgetting device", "Resetting device"):
             with self.subTest(label=label):
                 self.assertIsNotNone(crawler._danger_reason(label, config))
         for label in ("Continue", "Next", "Not now", "Settings", "Preview"):
