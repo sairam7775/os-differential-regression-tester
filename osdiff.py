@@ -108,6 +108,19 @@ def appium_ready(url):
         return False
 
 
+def _known_sensitive_values(cfg, scenario_paths=None):
+    """Collect known credentials and selected targets for local server-log sanitization."""
+    from osdiff.crawler import _sensitive_values
+    values = [*cfg.get("_sensitiveValues", []), *_sensitive_values(cfg.get("crawler", {}))]
+    values += [os.getenv(name) for name in cfg.get("appium", {}).get(
+        "sensitiveEnvNames", ["TEST_USER_EMAIL", "TEST_USER_PASSWORD"])]
+    for path in scenario_paths or []:
+        scenario = json.loads(Path(path).read_text(encoding="utf-8"))
+        values += [os.path.expandvars(str(step.get("text", ""))) for step in scenario.get("steps", [])
+                   if step.get("type") == "type_text"]
+    return [value for value in values if value]
+
+
 def _redact_file(path, env_names, sensitive_values=None):
     """Sanitize known credentials and identifiers in retained local server logs."""
     path = Path(path)
@@ -194,7 +207,7 @@ def start_appium(cfg, run_root=None):
     except Exception:
         proc.kill()
         proc.wait(timeout=8)
-    _redact_file(log, appium_cfg.get("sensitiveEnvNames", []), cfg.get("_sensitiveValues"))
+    _redact_file(log, appium_cfg.get("sensitiveEnvNames", []), _known_sensitive_values(cfg))
     raise RuntimeError(f"Appium did not start. See redacted log: {log}")
 
 
@@ -217,7 +230,7 @@ def stop_appium(handle, cfg):
     log = handle.get("log")
     if log:
         appium_cfg = cfg.get("appium", {})
-        _redact_file(log, appium_cfg.get("sensitiveEnvNames", []), cfg.get("_sensitiveValues"))
+        _redact_file(log, appium_cfg.get("sensitiveEnvNames", []), _known_sensitive_values(cfg))
         if not bool(appium_cfg.get("saveServerLog", False)):
             try:
                 Path(log).unlink()
@@ -340,6 +353,8 @@ def scenario_files(args):
 
 def runtime_for(cfg, platform_name, target, info):
     """Build virtual-target Appium/reset settings with config-relative app paths and privacy inputs."""
+    # Keep generated virtual target IDs private in retained Appium logs too.
+    cfg.setdefault("_sensitiveValues", []).append(info["udid"])
     platform_cfg = cfg[platform_name]
     out = {
         "udid": info["udid"],
@@ -914,6 +929,7 @@ def run_cmd(args):
     if missing_scenarios:
         raise RuntimeError("Scenario file(s) not found: " + ", ".join(missing_scenarios))
 
+    cfg["_sensitiveValues"] = _known_sensitive_values(cfg, scenarios)
     run_root = _new_run_root(cfg=cfg)
     report_root = private_dir(run_root / "report")
 

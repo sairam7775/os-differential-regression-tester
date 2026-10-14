@@ -394,6 +394,14 @@ class AppiumLifecycleTests(unittest.TestCase):
             path=Path(td)/'appium.log'; path.write_text('synthetic-secret at synthetic-serial',encoding='utf-8')
             cli._redact_file(path,['CUSTOM_SECRET'],['synthetic-serial'])
             self.assertEqual(path.read_text(encoding='utf-8'),'[REDACTED] at [REDACTED]')
+            scenario=Path(td)/'flow.json'
+            scenario.write_text(json.dumps({'steps':[{'type':'type_text','text':'synthetic-inline-value'}]}),encoding='utf-8')
+            cfg={'appium':{'saveServerLog':True},'crawler':{'autoInputRules':[{'env':'CUSTOM_SECRET'}]},'android':{'appPath':'unused.apk'}}
+            cfg['_sensitiveValues']=cli._known_sensitive_values(cfg,[scenario])
+            cli.runtime_for(cfg,'android','baseline',{'udid':'synthetic-serial'})
+            path.write_text('synthetic-secret synthetic-inline-value synthetic-serial',encoding='utf-8')
+            cli.stop_appium({'process':None,'log':str(path)},cfg)
+            self.assertEqual(path.read_text(encoding='utf-8'),'[REDACTED] [REDACTED] [REDACTED]')
 
 
 if __name__ == "__main__":
